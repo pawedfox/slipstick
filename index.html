@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Slipstick</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main id="shell" class="shell" data-tauri-drag-region>
+      <!-- The input comes first in the page so it is the first thing keyboard
+           focus lands on. CSS places it last, at the bottom of the shell. -->
+      <div class="bar">
+        <!-- Pasted pictures, as small thumbnails in a row above the text. -->
+        <div id="pictures" class="pictures" hidden></div>
+        <span class="lead prompt" aria-hidden="true">&gt;</span>
+        <textarea
+          id="input"
+          rows="1"
+          spellcheck="false"
+          autocomplete="off"
+          autofocus
+          aria-label="Problem"
+          placeholder="Type or paste a problem"
+        ></textarea>
+      </div>
+
+      <button
+        id="minimise"
+        class="minimise"
+        tabindex="-1"
+        aria-label="Hide"
+        title="Hide (Esc)"
+      ></button>
+
+      <button
+        id="gear"
+        class="gear"
+        tabindex="-1"
+        aria-label="Settings"
+        aria-expanded="false"
+        aria-controls="settings"
+        title="Settings (Ctrl+,)"
+      >
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <!-- The teeth are a dashed ring; the body is a plain one. -->
+          <circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-dasharray="2.2 2.2" />
+          <circle cx="8" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="2" />
+        </svg>
+      </button>
+
+      <!-- Settings, in the space above the input. Each row is a name and
+           its choices; the choice in force is marked with aria-pressed. -->
+      <section id="settings" class="settings" aria-label="Settings" hidden>
+        <div class="setting">
+          <span class="setting-name">Shortcut</span>
+          <button id="hotkey" class="choice keys" title="Click, then press the new shortcut"></button>
+        </div>
+        <div class="setting">
+          <span class="setting-name">Start with Windows</span>
+          <span class="choices" data-setting="start_with_windows">
+            <button class="choice" data-value="false">Off</button>
+            <button class="choice" data-value="true">On</button>
+          </span>
+        </div>
+        <div class="setting">
+          <span class="setting-name">Theme</span>
+          <span class="choices" data-setting="theme">
+            <button class="choice" data-value="system" title="Dark when Windows is dark, light when it is light">Windows</button>
+            <button class="choice" data-value="dark">Dark</button>
+            <button class="choice" data-value="light">Light</button>
+          </span>
+        </div>
+        <div class="setting">
+          <span class="setting-name">Significant figures</span>
+          <span class="choices" data-setting="figures">
+            <button class="choice" data-value="3">3</button>
+            <button class="choice" data-value="4">4</button>
+            <button class="choice" data-value="5">5</button>
+            <button class="choice" data-value="6">6</button>
+          </span>
+        </div>
+        <div class="setting">
+          <span class="setting-name">Claude</span>
+          <span class="choices">
+            <span id="claude-state" class="setting-state"></span>
+            <button id="claude-action" class="choice act"></button>
+          </span>
+        </div>
+        <p id="claude-hint" class="setting-hint" hidden>
+          Sent problems go to Claude under your sign-in.
+        </p>
+        <div class="setting needs-claude">
+          <span class="setting-name">Model</span>
+          <span class="choices" data-setting="model">
+            <button class="choice" data-value="fast" title="Sonnet, low effort">Fast</button>
+            <button class="choice" data-value="deeper" title="Opus, medium effort: slower, and uses more of your allowance">Deeper</button>
+          </span>
+        </div>
+        <div class="setting needs-claude">
+          <span class="setting-name">Wrong formulas</span>
+          <span class="choices" data-setting="correction">
+            <button class="choice" data-value="flag" title="Work out what you typed, and point out the error">Flag</button>
+            <button class="choice" data-value="correct" title="Show the corrected result, and say what was changed">Correct</button>
+          </span>
+        </div>
+        <p id="settings-note" class="setting-hint problem" hidden></p>
+      </section>
+
+      <!-- A pasted picture at full size, opened by clicking its thumbnail. -->
+      <section id="preview" class="preview" hidden>
+        <img id="preview-image" alt="Pasted picture, full size" />
+      </section>
+
+      <section id="steps" class="steps" hidden></section>
+
+      <section id="readout" class="readout" data-tauri-drag-region hidden>
+        <!-- Several answers, or the two values being compared. -->
+        <div id="rows" class="rows" data-tauri-drag-region hidden></div>
+        <div id="single" class="result" data-tauri-drag-region>
+          <span class="lead equals" aria-hidden="true">=</span>
+          <div id="answer" class="answer" tabindex="0" role="button">
+            <span id="num" class="num"></span><span id="unit" class="unit"></span
+            ><span id="copied" class="copied">Copied</span>
+          </div>
+          <button id="toggle" class="toggle" aria-expanded="false" aria-controls="steps">
+            Steps
+          </button>
+        </div>
+        <!-- Other values the user asked for, then the formula Claude used,
+             then anything it assumed, then any warning. -->
+        <!-- For a comparison: which is larger, and by how much. -->
+        <div id="comparison" class="comparison" hidden></div>
+        <div id="also" class="also" hidden></div>
+        <div id="formula" class="formula" hidden></div>
+        <div id="assumed" class="note assumed" hidden></div>
+        <div id="sensitive" class="note sensitive" hidden></div>
+        <div id="flag" class="note flagged" hidden></div>
+      </section>
+
+      <div id="notice" class="notice" hidden>
+        <p id="message" class="message"></p>
+        <button id="action" class="action" hidden></button>
+      </div>
+    </main>
+  </body>
+</html>

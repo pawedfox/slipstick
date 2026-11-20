@@ -1,0 +1,767 @@
+/* The theme follows Windows: dark colours when Windows is dark, light when
+   it is light. <html data-theme="dark|light"> overrides that, for the
+   setting that will let the user choose. */
+
+:root {
+  /* Transparent margin around the shell. Must match SHELL_MARGIN in lib.rs
+     and main.ts. */
+  --margin: 12px;
+
+  --shell: #0c0c0c;
+  --edge: #3a3a3a;
+  --ink: #f2f2f2;
+  --typed: #d0d0d0; /* what you typed: a step dimmer than the answer */
+  --soft: #9b9b9b;
+  --rule: #262626;
+  --bar: #000;
+  --bar-edge: #4a4a4a;
+  --placeholder: #6f6f6f;
+  --accent: #d97757; /* orange: prompt, focus, hover */
+  --assumed: #9b9b9b;
+  /* Flags are yellow on a filled strip so they cannot be mistaken for the
+     orange accent, which is never used as a fill. */
+  --flag-ink: #f5d98a;
+  --flag-fill: #2e2500;
+  --flag-band: #f2c94c;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.5);
+
+  --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  --math: "Cambria Math", Cambria, "Sitka Text", Georgia, serif;
+}
+
+/* Light colours. The same values appear twice because CSS cannot share a
+   block between a media query and a selector: once for "Windows is light and
+   the user has not chosen", once for "the user chose light". Keep in step. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --shell: #f6f8f7;
+    --edge: #c9d0d4;
+    --ink: #14202b;
+    --typed: #2a3947;
+    --soft: #4a5a68;
+    --rule: #dfe4e6;
+    --bar: #fff;
+    --bar-edge: #c3cbd0;
+    --placeholder: #7c8994;
+    --accent: #b5532f;
+    --assumed: #4a5a68;
+    --flag-ink: #6f4100;
+    --flag-fill: #fbebc8;
+    --flag-band: #d99a00;
+    --shadow: 0 4px 10px rgba(20, 32, 43, 0.2), 0 1px 2px rgba(20, 32, 43, 0.18);
+  }
+}
+
+:root[data-theme="light"] {
+  --shell: #f6f8f7;
+  --edge: #c9d0d4;
+  --ink: #14202b;
+  --typed: #2a3947;
+  --soft: #4a5a68;
+  --rule: #dfe4e6;
+  --bar: #fff;
+  --bar-edge: #c3cbd0;
+  --placeholder: #7c8994;
+  --accent: #b5532f;
+  --assumed: #4a5a68;
+  --flag-ink: #6f4100;
+  --flag-fill: #fbebc8;
+  --flag-band: #d99a00;
+  --shadow: 0 4px 10px rgba(20, 32, 43, 0.2), 0 1px 2px rgba(20, 32, 43, 0.18);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* The window is a fixed, transparent rectangle; the shell sits at its
+   bottom edge and grows upward inside it. */
+body {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: var(--margin);
+  font: 13.5px/1.5 var(--mono);
+  color: var(--ink);
+  user-select: none;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 10px 10px;
+  border-radius: 18px;
+  background: var(--shell);
+  border: 1px solid var(--edge);
+  box-shadow: var(--shadow);
+}
+
+/* ---- minimise ---- */
+
+.minimise {
+  position: absolute;
+  top: 1px;
+  right: 8px;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.minimise::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  top: calc(50% - 1.5px);
+  height: 3px;
+  border-radius: 1.5px;
+  background: var(--accent);
+}
+
+.minimise:hover::before {
+  background: var(--ink);
+}
+
+/* ---- settings ---- */
+
+/* The gear is quiet until pointed at: orange is for the prompt, focus and
+   hover, and the minimise line already has it. */
+.gear {
+  position: absolute;
+  top: 1px;
+  right: 40px;
+  width: 26px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--placeholder);
+  cursor: pointer;
+}
+
+.gear:hover,
+.gear[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 10px 2px 15px;
+  font-size: 12.5px;
+}
+
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
+
+.setting-name {
+  color: var(--soft);
+}
+
+.choices {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.setting-state {
+  color: var(--typed);
+  margin-right: 8px;
+}
+
+/* A choice is plain text. The one in force is bright with an orange line
+   under it; orange is never a fill. */
+.choice {
+  font: inherit;
+  color: var(--soft);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 3px 6px 1px;
+  cursor: pointer;
+}
+
+.choice:hover {
+  color: var(--accent);
+}
+
+.choice[aria-pressed="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+/* A box, like the input, marks a control that does something when clicked:
+   the shortcut, and connecting or disconnecting Claude. */
+.choice.keys,
+.choice.act {
+  color: var(--ink);
+  border: 1px solid var(--bar-edge);
+  border-radius: 6px;
+  padding: 2px 9px;
+  background: var(--bar);
+}
+
+.choice.keys:hover,
+.choice.act:hover,
+.choice.keys.waiting {
+  border-color: var(--accent);
+}
+
+.choice.keys.waiting {
+  color: var(--accent);
+}
+
+.setting-hint {
+  margin: -2px 0 4px;
+  font-size: 12px;
+  color: var(--soft);
+  text-align: right;
+}
+
+.setting-hint.problem {
+  margin-top: 4px;
+  color: var(--flag-ink);
+}
+
+/* ---- steps ---- */
+
+.steps {
+  max-height: 372px;
+  overflow: auto;
+  padding: 0 10px 4px;
+  user-select: text;
+}
+
+.step {
+  padding: 7px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.step:last-child {
+  border-bottom: 0;
+}
+
+.step-working {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 16px;
+}
+
+.step-math,
+.formula,
+.also-line {
+  font: 15px/1.45 var(--math);
+}
+
+/* The short explanation sits on the right, and drops below the maths,
+   still right-aligned, when the line has no room for both. */
+.step-note {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--soft);
+  text-align: right;
+}
+
+/* What the engine computed for this step. */
+.step-value {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+
+sub {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
+/* ---- answer ---- */
+
+/* The "=" of the answer and the ">" of the input share one column, so the
+   number sits directly above the text that produced it. */
+.lead {
+  flex: none;
+  width: 17px;
+  color: var(--accent);
+}
+
+/* Left padding matches the bar's border plus padding (1px + 14px). */
+.readout {
+  padding: 0 10px 0 15px;
+}
+
+/* The input has changed since this answer was worked out. */
+.readout.stale {
+  opacity: 0.35;
+}
+
+.readout.stale .answer {
+  cursor: default;
+}
+
+/* Several answers of equal standing, or the two values of a comparison.
+   Three columns: a mark, the name, the value. */
+.rows {
+  display: grid;
+  grid-template-columns: 17px max-content 1fr;
+  column-gap: 9px;
+  row-gap: 3px;
+  align-items: baseline;
+}
+
+.row-name {
+  font: 16px/1.3 var(--math);
+  color: var(--soft);
+  padding-right: 6px;
+}
+
+.row-value {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 600 26px/1.2 var(--mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: left;
+  cursor: copy;
+}
+
+.row-value .unit {
+  font: 400 18px/1 var(--mono);
+  margin-left: 8px;
+}
+
+.row-value.copied-now::after {
+  content: "Copied";
+  font: 12px/1 var(--mono);
+  color: var(--accent);
+  margin-left: 10px;
+}
+
+/* In a comparison the two values are the working; the difference below
+   them is the answer, so they are quieter. */
+.rows.items {
+  margin-bottom: 2px;
+}
+
+.rows.items .row-value {
+  font-weight: 500;
+  font-size: 20px;
+  color: var(--typed);
+}
+
+.rows.items .row-value .unit {
+  font-size: 15px;
+}
+
+.comparison {
+  margin: 2px 0 0 26px;
+  font: 15px/1.45 var(--math);
+}
+
+/* With no big number, the Steps control sits at the top right. */
+.readout {
+  position: relative;
+}
+
+.readout > .toggle {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+}
+
+.result {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 9px;
+}
+
+.equals {
+  font: 400 26px/1 var(--mono);
+}
+
+/* 34px keeps the digits about 4 mm tall on the development laptop's panel,
+   which is roughly the smallest size that reads at a glance from 60 cm. */
+.answer {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  font: 600 34px/1.15 var(--mono);
+  font-variant-numeric: tabular-nums lining-nums;
+  cursor: copy;
+  border-radius: 6px;
+}
+
+.answer.long {
+  font-size: 24px;
+}
+
+.unit {
+  font: 400 22px/1 var(--mono);
+  color: var(--soft);
+}
+
+.copied {
+  font: 12px/1 var(--mono);
+  color: var(--accent);
+  align-self: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.copied.on {
+  opacity: 1;
+}
+
+/* Everything under the answer lines up with the number, past the "=". */
+.also,
+.formula,
+.note {
+  margin: 2px 0 0 26px;
+}
+
+.also-line {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The formula Claude used: what lets you check the answer at a glance. */
+.formula {
+  color: var(--soft);
+  user-select: text;
+  /* It should be one short line. If Claude writes more, show two at most. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.formula[hidden] {
+  display: none;
+}
+
+.note {
+  font-size: 12px;
+}
+
+/* An assumption the answer hangs on. The warning colour, but no filled
+   strip: that is kept for a definite error in the user's formula. */
+.note.sensitive {
+  color: var(--flag-ink);
+}
+
+.note.assumed {
+  color: var(--assumed);
+}
+
+.note.flagged {
+  color: var(--flag-ink);
+  background: var(--flag-fill);
+  border-left: 3px solid var(--flag-band);
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+
+.toggle {
+  font: inherit;
+  font-size: 12px;
+  color: var(--soft);
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  margin-left: auto;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--accent);
+}
+
+.toggle::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s;
+}
+
+.toggle[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+/* ---- messages: something is needed, went wrong, or is on offer ---- */
+
+.notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+}
+
+.message {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--typed);
+  user-select: text;
+}
+
+/* Waiting for Claude: three dots that fill in turn. */
+.message.working {
+  color: var(--soft);
+}
+
+.message.working::after {
+  content: "...";
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  width: 0;
+  animation: dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  to {
+    width: 3ch;
+  }
+}
+
+.action {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--shell);
+  background: var(--accent);
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--ink);
+}
+
+/* ---- input bar ---- */
+
+.bar {
+  order: 1; /* first in the page for keyboard focus, last on screen */
+  flex-wrap: wrap; /* the thumbnails take a row of their own */
+  display: flex;
+  align-items: flex-start;
+  gap: 9px; /* same as .result, so input text and number share a left edge */
+  border-radius: 10px;
+  background: var(--bar);
+  border: 1px solid var(--bar-edge);
+  padding: 10px 12px 10px 14px;
+  font-size: 13px;
+}
+
+.bar:focus-within {
+  border-color: var(--accent);
+}
+
+.prompt {
+  font-weight: 600;
+}
+
+/* Pasted pictures: a row of thumbnails above the text. Clicking one shows
+   it at full size; the small cross removes it. */
+.pictures {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.picture {
+  position: relative;
+  height: 38px;
+}
+
+.thumb {
+  display: block;
+  height: 100%;
+  max-width: 92px;
+  padding: 0;
+  border: 1px solid var(--bar-edge);
+  border-radius: 5px;
+  overflow: hidden;
+  background: #fff;
+  cursor: zoom-in;
+}
+
+.thumb:hover,
+.picture.viewing .thumb {
+  border-color: var(--accent);
+}
+
+.picture.viewing .thumb {
+  cursor: zoom-out;
+}
+
+.thumb img {
+  display: block;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+
+.remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--bar-edge);
+  border-radius: 50%;
+  background: var(--shell);
+  color: var(--soft);
+  font: 12px/1 var(--mono);
+  cursor: pointer;
+}
+
+.remove:hover {
+  color: var(--shell);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* A picture at full size, in the space above the answer. */
+.preview {
+  padding: 0 10px;
+  cursor: zoom-out;
+}
+
+.preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 380px;
+  margin: 0 auto;
+  border-radius: 6px;
+  background: #fff;
+}
+
+#input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--typed);
+  caret-color: var(--accent);
+  font: inherit;
+  padding: 0;
+  max-height: 59px; /* three lines */
+  overflow-y: auto;
+  user-select: text;
+}
+
+#input::placeholder {
+  color: var(--placeholder);
+}
+
+/* A sent problem goes quiet until its answer arrives. */
+.bar.sent {
+  border-color: var(--bar-edge);
+}
+
+.bar.sent #input {
+  color: var(--soft);
+}
+
+/* A thin scrollbar in the app's colours, in its own lane beside the text
+   so it never covers any. */
+#input {
+  scrollbar-gutter: stable;
+}
+
+#input::-webkit-scrollbar {
+  width: 6px;
+}
+
+#input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#input::-webkit-scrollbar-thumb {
+  background: var(--bar-edge);
+  border-radius: 3px;
+}
+
+#input::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+#input::selection,
+.steps ::selection {
+  background: var(--accent);
+  color: #000;
+}
+
+.answer:focus-visible,
+.toggle:focus-visible,
+.action:focus-visible,
+.choice:focus-visible,
+.gear:focus-visible,
+.minimise:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.steps::-webkit-scrollbar {
+  width: 6px;
+}
+
+.steps::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.steps::-webkit-scrollbar-thumb {
+  background: var(--edge);
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle::before,
+  .copied {
+    transition: none;
+  }
+
+  .message.working::after {
+    animation: none;
+    width: 3ch;
+  }
+}

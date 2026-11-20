@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "window-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 1420
+    },
+    {
+      "name": "dev-bridge",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/dev-bridge.mjs"],
+      "port": 1430
+    }
+  ]
+}
