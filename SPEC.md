@@ -240,8 +240,35 @@ public.
 - **Publishing a release:** push the version's tag, let the build finish,
   try the installer from the draft release, then publish the draft by
   hand. Each of these is done on the user's word.
-- Still to do after the first release: apply to SignPath for signing, and
-  add the repository's topics.
+- **Published 2026-11-21**, on the user's word, after the user installed
+  the 0.9.2 installer from the draft and found it working. Checked
+  without signing in: the repository page, the README's pictures and the
+  latest release open, and the downloaded installer's SHA-256 is the one
+  in `SHA256SUMS.txt`.
+- **Signing: held, decided by the user 2026-11-21.** SignPath
+  Foundation's [conditions](https://signpath.org/terms) and application
+  form were read that day. The form requires evidence that the project is
+  widely used or trusted (coverage, download figures, discussion), and
+  their terms say programs people download and run need "a certain
+  verifiable reputation". A project one day old has none, so the
+  application waits until there is something to show.
+  - Already met: an OSI licence (MIT), no proprietary part shipped (the
+    app runs the user's own Claude Code and bundles none of it; they may
+    ask about that), a public release described on its download page, a
+    build GitHub makes from the tag, and the product name and version
+    stamped on the app and the installer.
+  - To do when applying: a "Code signing policy" section on the README
+    and the release page (their wording for who signs, the team's roles,
+    and a privacy statement), multi-factor sign-in on the GitHub and
+    SignPath accounts, and a tried uninstall (the installer has an
+    uninstaller; it has not been tried).
+  - What it would mean: the certificate is issued to SignPath Foundation,
+    which is the publisher Windows shows; every release is approved by
+    hand in SignPath; the build would hand the installer to SignPath
+    before attaching it to the release.
+  - The conditions were a draft when read. Read them again before
+    applying.
+- Still to do: add the repository's topics.
 
 ## Content security policy
 
