@@ -17,7 +17,7 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.9.2 (0.9.1 is the released one). Work follows the "Roadmap" section of `SPEC.md`, in order:
+Version 0.9.2. Work follows the "Roadmap" section of `SPEC.md`, in order:
 
 - Items 1 (wider instant path) and 2 (session history, movable window,
   system theme) are done.
@@ -27,8 +27,8 @@ Version 0.9.2 (0.9.1 is the released one). Work follows the "Roadmap" section of
   Code. The API-key route is not built.
 - Item 5: pasting pictures (up to four, with a full-size view), the
   settings screen, the error states, the content security policy and the
-  README are built. 0.9.1 is public: see "Release" in `SPEC.md` for how
-  a release is made. Never change the repository's visibility, publish a
+  README are built. 0.9.2 is the first public release: see "Release" in
+  `SPEC.md` for how a release is made. Never change the repository's visibility, publish a
   release or push a tag without being asked.
 
 **Never run the installer from a Claude desktop session.** The session

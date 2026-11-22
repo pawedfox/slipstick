@@ -6,10 +6,9 @@ were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
 Status (2026-11-21, version 0.9.2): everything on the roadmap up to the
-README is built, for the Claude Code route, and 0.9.1 is the first public
-release (see "Release"). 0.9.2 adds limits on Claude's reply (see
-"Solver") and is not released. Not built: the API-key route, signing,
-memory.
+README is built, for the Claude Code route, and 0.9.2 is the first public
+release (see "Release"). It added limits on Claude's reply (see "Solver").
+Not built: the API-key route, signing, memory.
 The roadmap was reordered on 2026-11-19 after a review from an engineering
 technician's point of view (see "Roadmap").
 
@@ -224,16 +223,14 @@ public.
   someone to trust it is that it was built from the public source where
   they can see the build, with a checksum to compare. It is also what
   SignPath's free signing for open-source projects requires.
-- **Published 2026-11-21**, on the user's word: the repository is public
-  and the release "Slipstick v0.9.1" is on it. The installer was built by
-  GitHub from the public history's one commit.
-  - A first publication on 2026-11-20 was withdrawn the next day and
-    the repository started afresh. An installer downloaded in that time
-    was built from the same source code and has a different checksum
-    from the one now on the release.
-  - Not checked: nobody has run the published installer. The one the
-    user tried was an earlier GitHub build of the same source code.
-- **Release notes** for 0.9.1 are on the release and are not in the repo.
+- **The first public release is 0.9.2**, decided by the user 2026-11-21.
+  0.9.1 was built and tried (above), but a security review the same day
+  led to 0.9.2 (see "Solver") before anything was published for good, so
+  0.9.1 has no release. The tag `v0.9.1` marks its source.
+  - A first publication of 0.9.1 on 2026-11-20 was withdrawn the next day
+    and the repository started afresh. An installer downloaded in that
+    time is 0.9.1, without the limits 0.9.2 adds.
+- **Release notes** are on the release and are not in the repo.
 - **What is in the public repository.** Its history begins at the first
   public release: the working history before it is kept privately by the
   author. Working notes on the name, on Anthropic's terms and on

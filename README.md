@@ -8,7 +8,7 @@ hand harder problems to Claude if you want it to.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.9.1, the first public release. It is one person's tool,
+Status: version 0.9.2, the first public release. It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
