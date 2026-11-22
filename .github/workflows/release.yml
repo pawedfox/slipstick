@@ -1,0 +1,72 @@
+# Builds the Windows installer from this source and attaches it to a draft
+# release, whenever a version tag (v0.9.1, say) is pushed.
+#
+# The release stays a draft until someone publishes it by hand, so a pushed
+# tag never puts anything in front of the public by itself.
+#
+# The tag must match the version in src-tauri/tauri.conf.json: the release
+# is named after the app's version, not after the tag.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install the window's dependencies
+        run: npm ci
+
+      - name: Run the engine's tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      # Builds the app and the installer (tauri.conf.json runs `npm run
+      # build` first), then creates the draft release and uploads to it.
+      - name: Build and draft the release
+        id: build
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: "Slipstick v__VERSION__"
+          releaseBody: "The installer is not signed yet, so Windows will warn about it. See the README for how to install, and SHA256SUMS.txt to check your download."
+          releaseDraft: true
+          prerelease: false
+
+      # So a download can be checked against what was built here.
+      - name: Attach the installer's SHA-256
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACTS: ${{ steps.build.outputs.artifactPaths }}
+          TAG: v${{ steps.build.outputs.appVersion }}
+        run: |
+          $installers = $env:ARTIFACTS | ConvertFrom-Json | Where-Object { $_ -like '*.exe' }
+          $lines = foreach ($file in $installers) {
+            "$((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash.ToLower())  $(Split-Path -Leaf $file)"
+          }
+          $lines | Out-File -Encoding ascii SHA256SUMS.txt
+          Get-Content SHA256SUMS.txt
+          gh release upload $env:TAG SHA256SUMS.txt --clobber

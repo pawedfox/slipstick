@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Source for the app icon. Regenerate every size with:
+         npx tauri icon design/icon.svg
+       The mark is an equals sign drawn as two claw strokes: thick at the
+       left, tapering to a point at the right. Original artwork. -->
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="#0c0c0c"/>
+  <rect x="68" y="68" width="888" height="888" rx="204" fill="none" stroke="#3a3a3a" stroke-width="8"/>
+  <g fill="#d97757">
+    <path d="M300 306 L792 372 A20 20 0 0 1 792 412 L300 438 A66 66 0 0 1 300 306 Z"/>
+    <path d="M300 586 L792 652 A20 20 0 0 1 792 692 L300 718 A66 66 0 0 1 300 586 Z"/>
+  </g>
+</svg>

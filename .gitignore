@@ -1,0 +1,24 @@
+# Dependencies and build output
+node_modules/
+dist/
+target/
+src-tauri/target/
+src-tauri/gen/
+
+# Secrets — the API key belongs in Windows Credential Manager, never here
+.env
+.env.*
+*.key
+
+# Logs and editor files
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# The author's private working notes and backups. Never tracked.
+private/
+
+# Output of reference-set runs (varies from run to run)
+tests/reference/results/
