@@ -17,7 +17,7 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.9.1. Work follows the "Roadmap" section of `SPEC.md`, in order:
+Version 0.9.2 (0.9.1 is the released one). Work follows the "Roadmap" section of `SPEC.md`, in order:
 
 - Items 1 (wider instant path) and 2 (session history, movable window,
   system theme) are done.

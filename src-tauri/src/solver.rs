@@ -280,6 +280,12 @@ fn json_in(text: &str) -> Option<&str> {
     (end > start).then(|| &text[start..=end])
 }
 
+/// The most steps and assumptions a reply may have. Real working has a
+/// dozen steps at most. Every assumption runs the whole program again, so
+/// without a limit a reply could be built to keep the engine busy for hours.
+const MAX_STEPS: usize = 60;
+const MAX_ASSUMPTIONS: usize = 12;
+
 /// Runs Claude's reply and returns what to show.
 pub fn solve_reply(text: &str) -> Solved {
     let Some(reply) = json_in(text).and_then(|json| serde_json::from_str::<Reply>(json).ok()) else {
@@ -292,6 +298,12 @@ pub fn solve_reply(text: &str) -> Solved {
     }
     if reply.steps.is_empty() {
         return Solved::failed("Claude's reply had no working in it.");
+    }
+    if reply.steps.len() > MAX_STEPS {
+        return Solved::failed(format!("The working has more than {MAX_STEPS} steps."));
+    }
+    if reply.assumptions.len() > MAX_ASSUMPTIONS {
+        return Solved::failed(format!("There are more than {MAX_ASSUMPTIONS} assumptions."));
     }
 
     let mut program = Vec::new();
@@ -605,5 +617,33 @@ mod tests {
 
         assert_eq!(solve_reply("I think the answer is 42.").state, "failed");
         assert_eq!(solve_reply(r#"{"state":"answer","steps":[]}"#).state, "failed");
+    }
+
+    /// A reply with this many steps, each a volt more than the last, and
+    /// this many assumptions.
+    fn reply_with(steps: usize, assumptions: usize) -> String {
+        let steps: Vec<serde_json::Value> = (0..steps)
+            .map(|i| {
+                let expr = if i == 0 { "1V".to_string() } else { format!("V_s{} + 1V", i - 1) };
+                serde_json::json!({ "name": format!("V_s{i}"), "expr": expr, "note": "" })
+            })
+            .collect();
+        let assumptions: Vec<String> = (0..assumptions).map(|i| format!("thing {i}")).collect();
+        serde_json::json!({ "state": "answer", "steps": steps, "assumptions": assumptions }).to_string()
+    }
+
+    #[test]
+    fn a_reply_too_large_to_be_working_fails() {
+        let most = solve_reply(&reply_with(MAX_STEPS, MAX_ASSUMPTIONS));
+        assert_eq!(most.state, "assumed");
+        assert_eq!(most.result.unwrap().number, "60.00");
+
+        let steps = solve_reply(&reply_with(MAX_STEPS + 1, 0));
+        assert_eq!(steps.state, "failed");
+        assert_eq!(steps.message.as_deref(), Some("The working has more than 60 steps."));
+
+        let assumptions = solve_reply(&reply_with(3, MAX_ASSUMPTIONS + 1));
+        assert_eq!(assumptions.state, "failed");
+        assert_eq!(assumptions.message.as_deref(), Some("There are more than 12 assumptions."));
     }
 }

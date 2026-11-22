@@ -5,9 +5,11 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-20, version 0.9.1): everything on the roadmap up to the
+Status (2026-11-21, version 0.9.2): everything on the roadmap up to the
 README is built, for the Claude Code route, and 0.9.1 is the first public
-release (see "Release"). Not built: the API-key route, signing, memory.
+release (see "Release"). 0.9.2 adds limits on Claude's reply (see
+"Solver") and is not released. Not built: the API-key route, signing,
+memory.
 The roadmap was reordered on 2026-11-19 after a review from an engineering
 technician's point of view (see "Roadmap").
 
@@ -469,6 +471,27 @@ What the engine gained for this: named values, `solve` with a starting guess
 (secant method), a unit to show a result in, and a label for plain numbers
 such as dB. A value whose unit has no name (mA/V²) is shown in SI base units
 so later steps can still use it.
+
+Limits on a reply (0.9.2, from a security review on 2026-11-21). Claude's
+reply can be steered by what is pasted into a problem, so the engine does
+not trust its size. Anything over a limit is "failed", like any other
+working that will not run, and no number is shown:
+
+- A formula may be 1000 characters (`MAX_STEP_CHARS` in `calc.rs`). Typed
+  input keeps its own limit of 400.
+- Signs, brackets, roots and powers may nest about a hundred brackets deep
+  (`MAX_DEPTH`), for typed input too. Deeper nesting used to run the
+  thread out of stack, which ends the app.
+- One run of a program may try 20,000 values across all its equations
+  (`SOLVE_TRIES`).
+- A reply may have 60 steps and 12 assumptions (`MAX_STEPS` and
+  `MAX_ASSUMPTIONS` in `solver.rs`), because every assumption runs the
+  whole program again.
+
+The dev bridge (`tools/dev-bridge.mjs`) answers only the window's own page
+at `http://localhost:1420`: it checks the request's origin and host. Before
+0.9.2 any web page open on the PC could post to it and have Claude asked on
+the user's plan.
 
 Not possible in this design: anything the formula language cannot express
 (matrices, integrals, lookup tables). Claude is told to say so. Complex

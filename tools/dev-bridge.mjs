@@ -43,10 +43,42 @@ const body = (request) =>
     request.on('end', () => resolve(text));
   });
 
+// The names this server answers to. A request for any other name has been
+// pointed here by someone else's address.
+const OWN_HOSTS = [`localhost:${PORT}`, `127.0.0.1:${PORT}`];
+
+/** Whether a request may be answered: only the window's own page may ask.
+ *  Any web page open in a browser on this PC can send requests here, and
+ *  `/ask` spends the user's Claude usage, so every other caller is refused.
+ *  (The CORS header below only stops a page reading the reply.) */
+function allowed(request) {
+  const { origin, host } = request.headers;
+  if (!OWN_HOSTS.includes(host ?? '')) return false;
+  // A page always names itself when it posts. The fixture pictures are
+  // plain files and may also be opened directly, which sends no origin.
+  if (request.method === 'GET') return origin === undefined || origin === WINDOW_ORIGIN;
+  return origin === WINDOW_ORIGIN && (request.method === 'POST' || request.method === 'OPTIONS');
+}
+
 createServer(async (request, response) => {
+  if (!allowed(request)) {
+    response.statusCode = 403;
+    return response.end();
+  }
   response.setHeader('Access-Control-Allow-Origin', WINDOW_ORIGIN);
   response.setHeader('Access-Control-Allow-Headers', 'content-type');
   if (request.method === 'OPTIONS') return response.end();
+  try {
+    await answer(request, response);
+  } catch {
+    // A body that is not JSON, say. One bad request must not stop the bridge.
+    response.statusCode = 400;
+    response.end();
+  }
+}).listen(PORT, '127.0.0.1', () => console.log(`dev bridge on http://localhost:${PORT}`));
+
+async function answer(request, response) {
+  const posted = request.method === 'POST';
 
   const send = (value, type = 'application/json') => {
     response.setHeader('Content-Type', type);
@@ -59,11 +91,11 @@ createServer(async (request, response) => {
     ...(deeper ? ['--deeper'] : []),
   ];
 
-  if (request.url === '/evaluate') {
+  if (posted && request.url === '/evaluate') {
     const asked = JSON.parse(await body(request));
     return send((await solve(['--instant', ...options(asked)], asked.input)) || 'null');
   }
-  if (request.url === '/ask') {
+  if (posted && request.url === '/ask') {
     // The whole request (problem and any image) goes through as JSON.
     const text = await body(request);
     const out = await solve(['--ask', ...options(JSON.parse(text))], text);
@@ -81,4 +113,4 @@ createServer(async (request, response) => {
   }
   response.statusCode = 404;
   response.end();
-}).listen(PORT, '127.0.0.1', () => console.log(`dev bridge on http://localhost:${PORT}`));
+}

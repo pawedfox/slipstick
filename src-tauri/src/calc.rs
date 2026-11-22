@@ -534,9 +534,27 @@ struct Parser<'a> {
     bare_prefix: bool,
     /// Units the user typed, with the power each was raised to.
     typed: Vec<(usize, i32)>,
+    /// How many signs, brackets, roots and powers deep the parser is now.
+    depth: usize,
 }
 
+/// The deepest nesting the parser will follow: about a hundred brackets
+/// inside one another. Each level uses some of the thread's stack, and
+/// running out of stack ends the whole app, so anything deeper is refused.
+const MAX_DEPTH: usize = 200;
+
 impl<'a> Parser<'a> {
+    /// Runs one nested part of the grammar, refusing if it is too deep.
+    fn nested(&mut self, part: fn(&mut Self) -> Option<Quantity>) -> Option<Quantity> {
+        if self.depth >= MAX_DEPTH {
+            return None;
+        }
+        self.depth += 1;
+        let result = part(self);
+        self.depth -= 1;
+        result
+    }
+
     fn new(tokens: &'a [Token], bare_m: BareM, names: &'a [(String, Quantity)]) -> Self {
         Self {
             tokens,
@@ -551,6 +569,7 @@ impl<'a> Parser<'a> {
             joules: false,
             bare_prefix: false,
             typed: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -628,6 +647,10 @@ impl<'a> Parser<'a> {
     }
 
     fn unary(&mut self) -> Option<Quantity> {
+        self.nested(Self::signed)
+    }
+
+    fn signed(&mut self) -> Option<Quantity> {
         if self.take(Token::Minus) {
             let mut operand = self.unary()?;
             operand.value = -operand.value;
@@ -730,6 +753,10 @@ impl<'a> Parser<'a> {
     }
 
     fn primary(&mut self) -> Option<Quantity> {
+        self.nested(Self::operand)
+    }
+
+    fn operand(&mut self) -> Option<Quantity> {
         let token = self.peek()?.clone();
         self.pos += 1;
         match token {
@@ -1335,7 +1362,19 @@ pub struct ProgramError {
 
 type Names = Vec<(String, Quantity)>;
 
+/// The longest formula a step of a program may be, in characters. Claude's
+/// formulas are a line at most; anything far longer is not working.
+pub const MAX_STEP_CHARS: usize = 1000;
+
+/// How many times one run of a program may try a value in an equation,
+/// over all its `solve` steps together. An equation that converges needs a
+/// few dozen tries; this stops a reply built to keep the engine busy.
+const SOLVE_TRIES: u32 = 20_000;
+
 fn evaluate_step(text: &str, to: Option<&str>, names: &Names) -> Option<Outcome> {
+    if text.chars().count() > MAX_STEP_CHARS || to.is_some_and(|unit| unit.chars().count() > MAX_STEP_CHARS) {
+        return None;
+    }
     let mut tokens = lex(text, names)?;
     if let Some(unit) = to {
         tokens.push(Token::Word("to".into()));
@@ -1366,8 +1405,19 @@ fn residual(equation: &str, name: &str, x: Quantity, names: &Names) -> Option<f6
 
 /// Secant method, shortening any step that leaves the region where the
 /// equation can be evaluated (for example a logarithm of a negative number).
-fn solve(equation: &str, name: &str, guess: Quantity, names: &Names) -> Option<Quantity> {
-    let at = |x: f64| residual(equation, name, Quantity::of(x, guess.dim), names);
+///
+/// `tries` is how many more values may be tried; it runs down as they are.
+fn solve(
+    equation: &str,
+    name: &str,
+    guess: Quantity,
+    names: &Names,
+    tries: &std::cell::Cell<u32>,
+) -> Option<Quantity> {
+    let at = |x: f64| {
+        tries.set(tries.get().checked_sub(1)?);
+        residual(equation, name, Quantity::of(x, guess.dim), names)
+    };
 
     let mut x0 = guess.value;
     let mut f0 = at(x0)?;
@@ -1403,6 +1453,7 @@ fn solve(equation: &str, name: &str, guess: Quantity, names: &Names) -> Option<Q
 pub fn run_program(steps: &[Step]) -> Result<Vec<Computed>, ProgramError> {
     let mut names: Names = Vec::new();
     let mut computed = Vec::new();
+    let tries = std::cell::Cell::new(SOLVE_TRIES);
 
     for (index, step) in steps.iter().enumerate() {
         let fail = |reason| ProgramError { step: index, reason };
@@ -1423,7 +1474,7 @@ pub fn run_program(steps: &[Step]) -> Result<Vec<Computed>, ProgramError> {
                 let guess = evaluate_step(guess, None, &names)
                     .ok_or_else(|| fail("the starting guess could not be worked out"))?
                     .quantity;
-                let root = solve(equation, step.name, guess, &names)
+                let root = solve(equation, step.name, guess, &names, &tries)
                     .ok_or_else(|| fail("the equation could not be solved"))?;
                 // Show the root the same way any other value would be shown.
                 names.push((step.name.to_string(), root));
@@ -1880,5 +1931,47 @@ mod tests {
         ] {
             refuse(input);
         }
+    }
+
+    /// `depth` brackets, signs or roots around a 2, then `* 3V`.
+    fn nested_in(open: &str, close: &str, depth: usize) -> String {
+        format!("{}2{} * 3V", open.repeat(depth), close.repeat(depth))
+    }
+
+    #[test]
+    fn deep_nesting_is_refused_not_followed() {
+        // Ordinary nesting is unaffected.
+        check(&nested_in("(", ")", 20), "6.000 V");
+        check("--2 * 3V", "6.000 V");
+        // Deeper than anyone writes, and still within the typed-input limit.
+        refuse(&nested_in("(", ")", 150));
+        refuse(&nested_in("-", "", 300));
+        refuse(&nested_in("√", "", 300));
+        refuse(&format!("2{} * 3V", "^2".repeat(150)));
+    }
+
+    #[test]
+    fn a_program_step_far_too_deep_or_long_fails_without_crashing() {
+        let failed = |text: &str| {
+            let steps = [Step { name: "V_a", kind: StepKind::Expression(text), to: None }];
+            run_program(&steps).map(|_| ()).unwrap_err().reason
+        };
+        // Within the length limit, but nested far too deep.
+        assert_eq!(failed(&nested_in("(", ")", 450)), "the expression could not be worked out");
+        assert_eq!(failed(&nested_in("-", "", 900)), "the expression could not be worked out");
+        // Too long to be a formula at all. This depth would use up the stack.
+        assert_eq!(failed(&nested_in("(", ")", 50_000)), "the expression could not be worked out");
+        let long = format!("1V{}", " + 1V".repeat(MAX_STEP_CHARS / 5));
+        assert_eq!(failed(&long), "the expression could not be worked out");
+    }
+
+    #[test]
+    fn solving_stops_when_its_tries_run_out() {
+        let names = Names::new();
+        let guess = Quantity::plain(1.0);
+        let root = solve("R^2 = 4", "R", guess, &names, &std::cell::Cell::new(SOLVE_TRIES)).unwrap();
+        assert!((root.value - 2.0).abs() < 1e-9);
+        assert!(solve("R^2 = 4", "R", guess, &names, &std::cell::Cell::new(3)).is_none());
+        assert!(solve("R^2 = 4", "R", guess, &names, &std::cell::Cell::new(0)).is_none());
     }
 }
