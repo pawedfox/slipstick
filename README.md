@@ -186,7 +186,7 @@ decided and why, and what has and has not been tested.
 - The installer is not signed.
 - A way to use Claude without Claude Code installed.
 - Memory of your notation and preferences.
-- Not tested: uninstalling, displays scaled above 100%, Windows 10.
+- Not tested: Windows 10, and displays scaled above 125%.
 - Not in the instant path: complex numbers, decibels, temperature
   differences, and conversions between rpm and Hz. Those go to Claude.
 - Answers from Claude are checked against a set of 46 reference problems.

@@ -17,19 +17,21 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.9.2. Work follows the "Roadmap" section of `SPEC.md`, in order:
+Version 0.9.2, the first public release. Work follows the "Roadmap"
+section of `SPEC.md`, in order. It was revised on 2026-11-22:
 
-- Items 1 (wider instant path) and 2 (session history, movable window,
-  system theme) are done.
-- Item 3 (installer) is built and installed on the dev machine, but
-  unsigned.
-- Item 4 (Claude as an optional extra) works through the user's Claude
-  Code. The API-key route is not built.
-- Item 5: pasting pictures (up to four, with a full-size view), the
-  settings screen, the error states, the content security policy and the
-  README are built. 0.9.2 is the first public release: see "Release" in
-  `SPEC.md` for how a release is made. Never change the repository's visibility, publish a
-  release or push a tag without being asked.
+- The first roadmap is built: the instant path, session history, a
+  movable window, the system theme, the installer, Claude through the
+  user's Claude Code, pasted pictures, the settings screen, the error
+  states, the content security policy and the README.
+- Next is item 2 of the revised roadmap: widening the instant path
+  (decibels, temperature differences, `rpm to Hz`, then complex numbers).
+- The installer is unsigned. The application for signing is held until
+  there is use to show; see "Release" in `SPEC.md`.
+- The API-key route is not built. It is item 4.
+- See "Release" in `SPEC.md` for how a release is made. Never change the
+  repository's visibility, publish a release or push a tag without being
+  asked.
 
 **Never run the installer from a Claude desktop session.** The session
 redirects writes under AppData into the Claude app's private storage, so

@@ -9,8 +9,8 @@ Status (2026-11-21, version 0.9.2): everything on the roadmap up to the
 README is built, for the Claude Code route, and 0.9.2 is the first public
 release (see "Release"). It added limits on Claude's reply (see "Solver").
 Not built: the API-key route, signing, memory.
-The roadmap was reordered on 2026-11-19 after a review from an engineering
-technician's point of view (see "Roadmap").
+The roadmap was revised on 2026-11-22, after that release (see "Roadmap").
+Next: widening the instant path.
 
 ## Purpose
 
@@ -259,16 +259,18 @@ public.
     stamped on the app and the installer.
   - To do when applying: a "Code signing policy" section on the README
     and the release page (their wording for who signs, the team's roles,
-    and a privacy statement), multi-factor sign-in on the GitHub and
-    SignPath accounts, and a tried uninstall (the installer has an
-    uninstaller; it has not been tried).
+    and a privacy statement), and multi-factor sign-in on the GitHub and
+    SignPath accounts. The uninstaller they require was tried on
+    2026-11-22 (see "Roadmap").
   - What it would mean: the certificate is issued to SignPath Foundation,
     which is the publisher Windows shows; every release is approved by
     hand in SignPath; the build would hand the installer to SignPath
     before attaching it to the release.
   - The conditions were a draft when read. Read them again before
     applying.
-- Still to do: add the repository's topics.
+- **Topics** on the repository, added 2026-11-22: calculator,
+  engineering-calculator, engineering, electronics, mechatronics,
+  unit-converter, windows, desktop-app, tauri, rust.
 
 ## Content security policy
 
@@ -1162,7 +1164,7 @@ Code on their plan, and an API key).
       Pick the default from the numbers. **Blocked: needs the API key.**
 - [ ] In the window shell, not yet checked by hand: the tray icon (left
       click to show, right click for Show / Quit), copying the answer, the
-      light theme, displays scaled above 100%, and whether a launch from the taskbar
+      light theme, displays scaled above 125%, and whether a launch from the taskbar
       pin takes keyboard focus (a launch from a background process does not;
       the hotkey does).
 - [x] Before release: set a content security policy (done in 0.8.1, see
@@ -1207,8 +1209,62 @@ What was found (2026-11-19):
 
 ## Roadmap
 
-Reordered 2026-11-19 after reviewing the app as an engineering technician
-would use it. The findings that drove the change:
+Revised 2026-11-22 with the user, after the first public release. What
+changed and why:
+
+- Signing no longer comes next. SignPath asks for evidence of use (see
+  "Release"), so it follows from the app being worth using and being seen.
+- The instant path is still where the daily value is, and it is what
+  everyone gets with no setup, so widening it comes before anything about
+  Claude.
+- The API-key route is smaller than first planned. The engine already
+  works out every number from Claude's formulas, so it needs another way
+  of asking, a place for the key and a settings row. The open questions
+  about code execution (under "Still open") matter only if that way of
+  computing is taken up again.
+- Follow-up context comes before memory: asking "and at 5 V?" after an
+  answer is useful every day, while the app already accepts the user's
+  notation.
+
+Each item is done only when it works in the running app, passes its tests,
+and has not broken an earlier item.
+
+1. **Finish what 0.9.2 claims.**
+   - Uninstalling: tried by the user 2026-11-22 with the installed 0.9.2.
+     The uninstaller in the install folder removed the program and the
+     desktop shortcut, a Windows search for Slipstick then found nothing,
+     and installing again brought both back. Not checked: whether the
+     settings file and a "Start with Windows" entry are removed.
+   - Display scaling: tried by the user at 125% the same day. Everything
+     works and the window sits in its corner. The user finds it less
+     sharp than at 100%, as scaled windows generally are. 150% not tried.
+   - Repository topics: added 2026-11-22.
+   - Still not tried: Windows 10.
+2. **Widen the instant path again.** The small ones first: decibels,
+   temperature differences, and `rpm to Hz`. The last is refused on
+   purpose today (see "Instant path"); it needs a rule that answers
+   `1500 rpm to Hz` as 25 Hz without breaking torque times speed. Then
+   complex numbers and impedance, which is the large one. Every new thing
+   accepted or refused gets a unit test, and the evaluator stays strict.
+3. **Get it used, then apply for signing.** The author posts it where
+   engineers would use it. When there are stars, downloads or discussion
+   to point to, apply to SignPath (what to do then is under "Release").
+4. **Claude without Claude Code: the API-key route.** Kept, but after the
+   instant path, because needing a key puts people off. The key lives
+   only in Windows Credential Manager.
+5. **Follow-up context between problems.** Optional. Nothing about it is
+   written to disk.
+6. **Memory of preferences**, as designed under "Memory".
+
+**Version 1.0** (proposed 2026-11-22, not yet confirmed by the user): the
+first signed release with items 1 and 2 done. "After v1" elsewhere in this
+file means items 5 and 6.
+
+### The first roadmap (2026-11-19): built
+
+Written after reviewing the app as an engineering technician would use
+it. Its items 1 to 5 are built; what was left of them is in the roadmap
+above. The findings that drove it:
 
 - The everyday value is the instant path, which needs no setup and already
   beats a desktop or handheld calculator. The AI is used a few times a day,
@@ -1228,8 +1284,8 @@ and has not broken an earlier item.
    forgiving input (`x`, `²`, `%`). *Built 2026-11-19.*
 2. **Remove daily friction.** Session history on the arrow keys, a movable
    window that remembers its place, theme that follows Windows. *Built
-   2026-11-19.* Still to do: a check at 125% and 150% display scaling,
-   which needs the Windows display setting changed by hand.
+   2026-11-19.* Display scaling was checked later, at 125% (see item 1
+   of the roadmap above).
 3. **Make installation trivial.** An installer that needs no admin rights,
    signed (SignPath Foundation offers free signing for open-source
    projects), working fully with no account. An original icon.
@@ -1241,9 +1297,8 @@ and has not broken an earlier item.
      started on its own and answered `3.5 bar to psi` correctly.
    - Done: an original icon, two claw strokes forming an equals sign
      (`design/icon.svg`).
-   - Not done: signing. SignPath Foundation needs a public repository and
-     builds run by GitHub Actions, so this waits until the repo is public.
-     Until then Windows will warn about the installer on other machines.
+   - Not done: signing. Held since 2026-11-21 (see "Release"). Until the
+     installer is signed, Windows warns about it.
    - **The install on the dev machine was never real** (found 2026-11-19).
      Every install up to 0.6.0 was run from a Claude desktop session, which
      redirects writes under AppData into the Claude app's own private
@@ -1267,7 +1322,7 @@ and has not broken an earlier item.
      first run of the installer's click-through screens.
    - A leftover copy of the program still sits in the Claude app's private
      storage from the earlier attempts. It is not used by anything.
-   - Not tested: uninstalling.
+   - Uninstalling was tried later (see item 1 of the roadmap above).
    - Note: on a PC without WebView2 the installer downloads it, which needs
      the internet. Windows 11 already has it.
 4. **Add Claude as an optional extra.** Both routes, offered at first need.
@@ -1280,8 +1335,9 @@ and has not broken an earlier item.
    "Settings"), error states (built in 0.8.0, see "Error states"), content
    security policy (set in 0.8.1), README with the privacy statement and
    "unofficial" line (written 2026-11-20, see "README"), public repo
-   (prepared 2026-11-20, see "Release"; not yet public).
-6. **After v1:** memory of preferences, follow-up context.
+   (public since 2026-11-21, see "Release").
+6. **After v1:** memory of preferences, follow-up context. These are now
+   items 5 and 6 of the roadmap above, in the other order.
 
 Already built: the window shell (item 0), and items 1 and 2.
 
@@ -1292,7 +1348,7 @@ drag on the top strip moved it by exactly the distance dragged; returning it
 to the default corner cleared the saved position. The light colours were
 checked in a browser with the system set to report light. Not checked: the
 "Move back to the corner" tray item, restoring the position after a full
-restart, and display scaling above 100%.
+restart. Display scaling was checked later, at 125%.
 
 ## Reference set
 
