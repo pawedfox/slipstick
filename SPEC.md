@@ -7,7 +7,7 @@ check), the old name is left in place.
 
 Status (2026-11-22, version 0.11.0): everything on the first roadmap is
 built, for the Claude Code route. 0.9.2 was the first public release,
-0.10.1 followed on 2026-11-22, and 0.11.0 was tagged for release the same
+0.10.1 followed on 2026-11-22, and 0.11.0, the current release, the same
 day (see "Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
 conversions between rpm and Hz to the instant path, and 0.11.0 adds
 complex numbers (see "Instant path"). That completes item 2 of the
@@ -261,6 +261,17 @@ public.
   numbers in the installed app. It is the first of these changes to
   touch the window: a complex answer has a second line, which had been
   seen only in the built-in browser.
+  - GitHub built it in under ten minutes, every step passing, and the
+    checksum in `SHA256SUMS.txt` is the installer's.
+  - **Tried by the user the same day**, from the draft. They were asked to
+    type five inputs (`3 + j4`, an impedance, a magnitude and angle,
+    `arg`, and a product that comes out real), to watch the window grow
+    by a line for a complex answer and go back, to copy a complex answer,
+    to look at the light theme if they use it, and to send a problem to
+    Claude. They reported that all of it was tested and works.
+  - **Published 2026-11-22** on the user's word. Checked without signing
+    in: it is the latest release, and the downloaded installer's SHA-256
+    is the one in `SHA256SUMS.txt`.
 - **Published 2026-11-21**, on the user's word, after the user installed
   the 0.9.2 installer from the draft and found it working. Checked
   without signing in: the repository page, the README's pictures and the
@@ -353,8 +364,8 @@ while the test copy runs.
   end. The `=` and the input's `>` are orange and share one column, so the
   number sits directly above the text that produced it. What was typed is a
   step dimmer than the answer.
-- The answer is set at 34 px. On the development laptop (15.4 inch,
-  1920×1200, 100% scaling) that makes the digits about 4 mm tall, roughly
+- The answer is set at 34 px. On the development laptop (a 15-inch screen
+  at 100% scaling) that makes the digits about 4 mm tall, roughly
   the smallest size that reads at a glance from 60 cm (character height of
   about 0.007 × viewing distance). Do not go smaller without re-checking.
 - Frameless, always on top, rounded corners.
@@ -656,7 +667,8 @@ neither), with the expected values worked out by hand; every reference
 problem through the instant path alone, with the same three answered as
 before; and eleven inputs typed into the window in the built-in browser,
 where the angle sits on the big line and the parts on the line beneath.
-Not checked: the real app, and the window in the light theme.
+The real app was checked by the user from the 0.11.0 installer (see
+"Release").
 
 Checked for 0.10.1 (2026-11-22): 61 unit tests, of which four groups are
 new (rotation and frequency, that programs do not convert between them,
@@ -1213,10 +1225,10 @@ Findings so far, 2026-11-19.
       - Not changed: the icon (two slanted strokes forming an equals sign;
         drawn as claw marks, but it reads as an equals sign), the orange
         accent, and the default shortcut Ctrl+Alt+C.
-- [x] **Hotkey, local check.** Ctrl+Alt+C is free on the dev machine. KiCad's
-      hotkey file has no Ctrl+Alt+C binding; there are no custom REAPER or
-      VS Code key files. REAPER's built-in defaults were not checked.
-      Ctrl+Alt+Space is already held by a running program.
+- [x] **Hotkey, local check.** Ctrl+Alt+C is free on the dev machine: none
+      of the programs there that keep their shortcuts in a file binds it.
+      Shortcuts built into a program and not kept in such a file were not
+      checked. Ctrl+Alt+Space was not free.
 - [x] **Reference set drafted.** 48 problems in `tests/reference/`, every
       expected number computed by `build.mjs` (33 answer, 5 must-not-flag,
       4 must-flag, 4 must-block, 2 memory). Still wanted: 5–10 of the user's
@@ -1232,7 +1244,7 @@ Findings so far, 2026-11-19.
       strip), then restyled after the first hands-on try: dark terminal look,
       a minimise button, and a short note beside each step.
 - [x] **Window shell built and tested (slice 1).** Tauri 2.12, vanilla
-      TypeScript. Measured on the dev machine (1920×1200, 100% scaling) by
+      TypeScript. Measured on the dev machine (at 100% scaling) by
       reading the window's state from Windows and driving it with real key
       presses and a real mouse click:
       - docked flush to the bottom-right of the work area, above the taskbar;
@@ -1367,7 +1379,7 @@ Code on their plan, and an API key).
 - [x] Before release: set a content security policy (done in 0.8.1, see
       "Content security policy"), and replace the template icons with an
       original one (done earlier: `design/icon.svg`).
-- [ ] REAPER default shortcuts for Ctrl+Alt+C.
+- [ ] Whether another program's built-in shortcuts use Ctrl+Alt+C.
 
 ## In flight
 
