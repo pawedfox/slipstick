@@ -17,7 +17,7 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.10.1, not released; 0.9.2 is the public release. Work follows
+Version 0.10.1, tagged for release on 2026-11-22. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-22:
 
 - The first roadmap is built: the instant path, session history, a

@@ -5,11 +5,12 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-22, version 0.10.1, not released): everything on the first
-roadmap is built, for the Claude Code route, and 0.9.2 is the first public
-release (see "Release"). 0.10.0 and 0.10.1 add decibels, temperature sums
-and conversions between rpm and Hz to the instant path (see "Instant
-path"). Not built: the API-key route, signing, memory.
+Status (2026-11-22, version 0.10.1): everything on the first roadmap is
+built, for the Claude Code route. 0.9.2 was the first public release, and
+0.10.1 was tagged for release on 2026-11-22 (see "Release"). 0.10.0 and
+0.10.1 add decibels, temperature sums and conversions between rpm and Hz
+to the instant path (see "Instant path"). Not built: the API-key route,
+signing, memory.
 The roadmap was revised on 2026-11-22, after that release (see "Roadmap").
 Next: complex numbers.
 
@@ -241,6 +242,10 @@ public.
 - **Publishing a release:** push the version's tag, let the build finish,
   try the installer from the draft release, then publish the draft by
   hand. Each of these is done on the user's word.
+- **0.10.1**, tagged 2026-11-22 on the user's word, to try decibels,
+  temperature sums and the rpm and Hz conversions in the installed app:
+  until then they had been checked only in unit tests and in the window
+  in the built-in browser. 0.10.0 was never tagged and has no release.
 - **Published 2026-11-21**, on the user's word, after the user installed
   the 0.9.2 installer from the draft and found it working. Checked
   without signing in: the repository page, the README's pictures and the
@@ -1369,11 +1374,11 @@ and has not broken an earlier item.
    complex numbers and impedance, which is the large one. Every new thing
    accepted or refused gets a unit test, and the evaluator stays strict.
    - *Built 2026-11-22, in 0.10.0:* decibels and temperature sums (see
-     "Instant path"). Not released.
+     "Instant path"). In the 0.10.1 release.
    - *Built 2026-11-22, in 0.10.1:* `rpm to Hz` and back, and `to hp` or
      `to Nm` on torque and speed. Torque times speed is unchanged. A bare
      "per second" is no longer called hertz, and power over rotation is
-     shown as a torque. Not released.
+     shown as a torque. In the 0.10.1 release.
    - Left: complex numbers and impedance.
 3. **Get it used, then apply for signing.** The author posts it where
    engineers would use it. When there are stars, downloads or discussion

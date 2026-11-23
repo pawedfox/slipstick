@@ -8,10 +8,8 @@ hand harder problems to Claude if you want it to.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.9.2 is the first public release. This page describes
-0.10.1, which is not released yet: it adds temperatures, decibels and
-conversions between rpm and Hz to what is answered as you type. It is one person's tool,
-in daily use by its author; expect rough edges. See
+Status: version 0.10.1. It is one person's tool, in daily use by its
+author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
