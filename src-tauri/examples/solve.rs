@@ -44,9 +44,10 @@ fn run() {
 
     if std::env::args().any(|arg| arg == "--instant") {
         let found = calc::evaluate_with_value(&reply).map(|(answer, si_value)| {
-            serde_json::json!({
-                "number": answer.number, "unit": answer.unit, "copy": answer.copy, "si_value": si_value,
-            })
+            // The answer as the window gets it, with the value for checking.
+            let mut found = serde_json::to_value(&answer).expect("could not write JSON");
+            found["si_value"] = si_value.into();
+            found
         });
         println!("{}", serde_json::to_string(&found).expect("could not write JSON"));
         return;

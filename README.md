@@ -8,8 +8,10 @@ hand harder problems to Claude if you want it to.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.10.1. It is one person's tool, in daily use by its
-author; expect rough edges. See
+Status: version 0.10.1 is the current release. This page describes 0.11.0,
+which is not released yet: it adds complex numbers to what is answered as
+you type. It is one person's tool, in daily use by its author; expect
+rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
@@ -41,6 +43,8 @@ No account and no network. The answer changes with every key.
 | `250mW in dBm` | 23.98 dBm |
 | `10 dBm + 3 dB` | 13.00 dBm |
 | `2V / 1V to dB` | 6.021 dB |
+| `10kohm + 1/(j*2*pi*1kHz*100nF)` | 10.13 kΩ ∠ −9.043° |
+| `230 V @ 0° - 230 V @ 120°` | 398.4 V ∠ −30.00° |
 | `VGS = -0.3V * (1 - sqrt(0.1mA / 0.2mA))` | −87.87 mV |
 
 It understands:
@@ -69,6 +73,11 @@ It understands:
   `47 in dB` is left to Claude.
 - `||` for parallel, `x` or `×` for multiply, `²` and `³`, `√`, `π`, `%`,
   and the usual functions (`sqrt ln log exp sin cos tan asin acos atan abs`).
+- **Complex numbers.** `j` is the imaginary unit, before or after a number:
+  `3 + j4`, `j*2*pi*1kHz*100mH`. A magnitude and angle is typed with `∠`
+  or `@`: `230 V @ 120°`. The answer shows the magnitude and angle, with
+  the real and imaginary parts on a line beneath; `abs`, `arg`, `re`,
+  `im` and `conj` take one apart.
 - **A name in front**, as you would write it on paper: `VGS = …`.
 
 It is strict on purpose. Anything it is not sure of gets no instant answer,
@@ -208,7 +217,6 @@ decided and why, and what has and has not been tested.
 - A way to use Claude without Claude Code installed.
 - Memory of your notation and preferences.
 - Not tested: Windows 10, and displays scaled above 125%.
-- Not in the instant path: complex numbers. Those go to Claude.
 - Answers from Claude are checked against a set of 46 reference problems.
   The instructions given to Claude were tuned on that same set, so passing
   it says less than it seems to.

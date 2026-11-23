@@ -88,6 +88,10 @@ struct Quantity {
     /// is 25 and `-40 °F` is -22.2. A reading can have a difference added
     /// or taken away, and two readings can be subtracted. Nothing else.
     reading: Option<Scale>,
+    /// The imaginary part, in the same units as `value`, which is then
+    /// the real part. Zero for everything but a complex number, and always
+    /// zero in a program: only typed input has a `j`.
+    im: f64,
 }
 
 impl Quantity {
@@ -96,7 +100,33 @@ impl Quantity {
     }
 
     fn of(value: f64, dim: Dim) -> Self {
-        Self { value, dim, percent: false, reading: None }
+        Self::complex(value, 0.0, dim)
+    }
+
+    fn complex(value: f64, im: f64, dim: Dim) -> Self {
+        Self { value, dim, percent: false, reading: None, im }
+    }
+
+    /// The size of a complex number, or of a real one without its sign.
+    fn magnitude(&self) -> f64 {
+        self.value.hypot(self.im)
+    }
+
+    /// The magnitude of a complex number; a real one as it is, sign and all.
+    fn magnitude_or_value(&self) -> f64 {
+        if self.im == 0.0 { self.value } else { self.magnitude() }
+    }
+
+    /// With a part that is only rounding noise beside the other set to
+    /// zero, so that `10 @ 90°` is j10 and `(1 + j)(1 - j)` is 2.
+    fn settled(mut self) -> Self {
+        let noise = self.magnitude() * 1e-12;
+        if self.im.abs() <= noise {
+            self.im = 0.0;
+        } else if self.value.abs() <= noise {
+            self.value = 0.0;
+        }
+        self
     }
 
     /// The reading as an absolute temperature in kelvin.
@@ -108,12 +138,26 @@ impl Quantity {
 /// What the window shows and what a copy puts on the clipboard.
 #[derive(Debug, PartialEq, Serialize)]
 pub struct Answer {
-    /// The number, for example `338.6`.
+    /// The number, for example `338.6`. For a complex answer, its
+    /// magnitude.
     pub number: String,
     /// SI prefix plus unit symbol, for example `kΩ`. May be empty.
     pub unit: String,
     /// A plain number for pasting. See `SPEC.md` for which value this is.
     pub copy: String,
+    /// For a complex answer: its angle, for example `−9.043°`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub angle: Option<String>,
+    /// For a complex answer: its real and imaginary parts, for example
+    /// `10.00 − j1.592 kΩ`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parts: Option<String>,
+}
+
+impl Answer {
+    fn real(number: String, unit: String, copy: String) -> Self {
+        Self { number, unit, copy, angle: None, parts: None }
+    }
 }
 
 // ---- units ------------------------------------------------------------------
@@ -325,6 +369,8 @@ enum Token {
     Percent,
     Parallel,
     Root,
+    /// Between a magnitude and its angle: `10 ∠ 30°`, or `10 @ 30 deg`.
+    Angle,
     Open,
     Close,
 }
@@ -347,6 +393,7 @@ fn lex(text: &str, names: &[(String, Quantity)]) -> Option<Vec<Token>> {
             '%' => Some(Token::Percent),
             '∥' => Some(Token::Parallel),
             '√' => Some(Token::Root),
+            '∠' | '@' => Some(Token::Angle),
             '(' => Some(Token::Open),
             ')' => Some(Token::Close),
             _ => None,
@@ -711,14 +758,12 @@ impl<'a> Parser<'a> {
         let mut left = self.product()?;
         while self.take(Token::Parallel) {
             let right = self.product()?;
-            if left.dim != right.dim
-                || left.value + right.value == 0.0
-                || left.reading.is_some()
-                || right.reading.is_some()
-            {
+            if left.dim != right.dim || left.reading.is_some() || right.reading.is_some() {
                 return None;
             }
-            left = Quantity::of(left.value * right.value / (left.value + right.value), left.dim);
+            // The product over the sum, which holds for complex values too.
+            let sum = Quantity::complex(left.value + right.value, left.im + right.im, left.dim);
+            left = Quantity { dim: left.dim, ..divide(multiply(left, right)?, sum)? };
         }
         Some(left)
     }
@@ -758,6 +803,7 @@ impl<'a> Parser<'a> {
         if self.take(Token::Minus) {
             let mut operand = self.unary()?;
             operand.value = -operand.value;
+            operand.im = -operand.im;
             Some(operand)
         } else if self.take(Token::Plus) {
             self.unary()
@@ -769,8 +815,11 @@ impl<'a> Parser<'a> {
     /// Right-associative, and tighter than a leading minus: `-2^2` is -4.
     fn power(&mut self) -> Option<Quantity> {
         let mut base = self.primary()?;
+        if self.typed_input() && self.take(Token::Angle) {
+            base = self.polar(base)?;
+        }
         while self.take(Token::Percent) {
-            if base.dim != NO_DIM {
+            if base.dim != NO_DIM || base.im != 0.0 {
                 return None;
             }
             base = Quantity { percent: true, ..Quantity::plain(base.value / 100.0) };
@@ -786,6 +835,28 @@ impl<'a> Parser<'a> {
         } else {
             Some(base)
         }
+    }
+
+    /// Complex numbers, like temperatures and decibels, are for typed
+    /// input. The language Claude writes its formulas in has none.
+    fn typed_input(&self) -> bool {
+        self.bare_m != BareM::Program
+    }
+
+    /// What follows the angle sign: `10 ∠ 30°` is ten at thirty degrees.
+    /// The angle must say what it is in (`deg`, `°`, `rad`), since a bare
+    /// 30 could be either, and the magnitude must be an ordinary value.
+    fn polar(&mut self, size: Quantity) -> Option<Quantity> {
+        let negative = self.take(Token::Minus);
+        if !negative {
+            self.take(Token::Plus);
+        }
+        let angle = self.primary()?;
+        if angle.dim != ANGLE_DIM || angle.im != 0.0 || size.im != 0.0 || size.reading.is_some() || size.percent {
+            return None;
+        }
+        let turn = if negative { -angle.value } else { angle.value };
+        Some(Quantity::complex(size.value * turn.cos(), size.value * turn.sin(), size.dim).settled())
     }
 
     /// Reads a word as a unit or prefix, noting what it says about the
@@ -910,15 +981,30 @@ impl<'a> Parser<'a> {
                         self.has_value = true;
                         return Some(Quantity::plain(std::f64::consts::E));
                     }
+                    // The imaginary unit, as electrical work writes it. In
+                    // front of a number it takes that number with it, so
+                    // `3 + j4` is the same as `3 + 4j`.
+                    "j" if self.typed_input() => {
+                        self.has_value = true;
+                        let unit = Quantity::complex(0.0, 1.0, NO_DIM);
+                        return match self.peek() {
+                            Some(Token::Number(_)) => multiply(unit, self.power()?),
+                            _ => Some(unit),
+                        };
+                    }
                     _ => {}
                 }
-                if is_function(&word) {
+                if is_function(&word) || (self.typed_input() && is_complex_function(&word)) {
                     if !self.take(Token::Open) {
                         return None;
                     }
                     let argument = self.sum()?;
                     if !self.take(Token::Close) {
                         return None;
+                    }
+                    // An angle found this way is shown in degrees.
+                    if matches!(word.as_str(), "arg" | "phase") {
+                        self.typed.push((unit_index("deg")?, 1));
                     }
                     return apply(&word, argument);
                 }
@@ -951,8 +1037,13 @@ fn add(left: Quantity, right: Quantity, sign: f64) -> Option<Quantity> {
         return None;
     }
     let value = left.value + sign * right.value;
+    let im = left.im + sign * right.im;
+    // A temperature is never complex.
+    if im != 0.0 && (left.reading.is_some() || right.reading.is_some()) {
+        return None;
+    }
     match (left.reading, right.reading) {
-        (None, None) | (Some(_), None) => Some(Quantity { value, ..left }),
+        (None, None) | (Some(_), None) => Some(Quantity { value, im, ..left }),
         // A difference with a reading added to it. Taking a reading away
         // from a difference means nothing.
         (None, Some(_)) => (sign > 0.0).then_some(Quantity { value, ..right }),
@@ -980,18 +1071,38 @@ fn multiply(a: Quantity, b: Quantity) -> Option<Quantity> {
     for (d, other) in dim.iter_mut().zip(b.dim) {
         *d += other;
     }
-    Some(Quantity::of(a.value * b.value, dim))
+    Some(Quantity::complex(a.value * b.value - a.im * b.im, a.value * b.im + a.im * b.value, dim))
 }
 
 fn divide(a: Quantity, b: Quantity) -> Option<Quantity> {
-    if b.value == 0.0 || a.reading.is_some() || b.reading.is_some() {
+    if (b.value == 0.0 && b.im == 0.0) || a.reading.is_some() || b.reading.is_some() {
         return None;
     }
     let mut dim = a.dim;
     for (d, other) in dim.iter_mut().zip(b.dim) {
         *d -= other;
     }
-    Some(Quantity::of(a.value / b.value, dim))
+    if a.im == 0.0 && b.im == 0.0 {
+        return Some(Quantity::of(a.value / b.value, dim));
+    }
+    // Scaled by the larger part of the divisor, so that squaring it cannot
+    // overflow or vanish.
+    let (re, im) = if b.value.abs() >= b.im.abs() {
+        let ratio = b.im / b.value;
+        let under = b.value + b.im * ratio;
+        ((a.value + a.im * ratio) / under, (a.im - a.value * ratio) / under)
+    } else {
+        let ratio = b.value / b.im;
+        let under = b.value * ratio + b.im;
+        ((a.value * ratio + a.im) / under, (a.im * ratio - a.value) / under)
+    };
+    Some(Quantity::complex(re, im, dim))
+}
+
+/// e to the power of a complex number: e^a (cos b + j sin b).
+fn exponential(re: f64, im: f64) -> Quantity {
+    let size = re.exp();
+    Quantity::complex(size * im.cos(), size * im.sin(), NO_DIM).settled()
 }
 
 /// The exponent must be a plain number. A quantity with units can only be
@@ -1000,6 +1111,14 @@ fn raise(base: Quantity, exponent: Quantity) -> Option<Quantity> {
     if exponent.dim != NO_DIM || base.reading.is_some() {
         return None;
     }
+    if exponent.im != 0.0 {
+        // A complex power of a plain positive number, as in `e^(j*pi/3)`.
+        if base.dim != NO_DIM || base.im != 0.0 || base.value <= 0.0 {
+            return None;
+        }
+        let log = base.value.ln();
+        return Some(exponential(exponent.value * log, exponent.im * log));
+    }
     let mut dim = NO_DIM;
     for (out, d) in dim.iter_mut().zip(base.dim) {
         let scaled = f64::from(d) * exponent.value;
@@ -1007,6 +1126,12 @@ fn raise(base: Quantity, exponent: Quantity) -> Option<Quantity> {
             return None;
         }
         *out = scaled.round() as i8;
+    }
+    if base.im != 0.0 {
+        // Through magnitude and angle, which gives the principal root.
+        let size = base.magnitude().powf(exponent.value);
+        let turn = base.im.atan2(base.value) * exponent.value;
+        return Some(Quantity::complex(size * turn.cos(), size * turn.sin(), dim).settled());
     }
     Some(Quantity::of(base.value.powf(exponent.value), dim))
 }
@@ -1018,13 +1143,31 @@ fn is_function(name: &str) -> bool {
     )
 }
 
+/// Functions for complex numbers. Kept apart from `is_function`, which
+/// also says what a step of a program may not be called: a program may
+/// still have a step named `phase` or `re`.
+fn is_complex_function(name: &str) -> bool {
+    matches!(name, "arg" | "phase" | "re" | "im" | "conj")
+}
+
 fn apply(name: &str, argument: Quantity) -> Option<Quantity> {
     if argument.reading.is_some() {
         return None;
     }
+    let Quantity { value: re, im, dim, .. } = argument;
     match name {
         "sqrt" => return raise(argument, Quantity::plain(0.5)),
-        "abs" => return Some(Quantity::of(argument.value.abs(), argument.dim)),
+        "abs" => return Some(Quantity::of(argument.magnitude(), dim)),
+        "re" => return Some(Quantity::of(re, dim)),
+        "im" => return Some(Quantity::of(im, dim)),
+        "conj" => return Some(Quantity::complex(re, -im, dim)),
+        // Nothing has an angle if it has no size.
+        "arg" | "phase" => {
+            return (argument.magnitude() > 0.0).then(|| Quantity::of(im.atan2(re), ANGLE_DIM));
+        }
+        "exp" if im != 0.0 => return (dim == NO_DIM).then(|| exponential(re, im)),
+        // The other functions are for real numbers.
+        _ if im != 0.0 => return None,
         _ => {}
     }
     // Trigonometry takes a plain number (radians) or an angle (`30 deg`).
@@ -1367,7 +1510,7 @@ fn as_decibels(tokens: &[Token], labelled: bool) -> Option<(Answer, f64)> {
         return None;
     }
     let positive = |tokens: &[Token]| {
-        reading(tokens, None, labelled).map(|outcome| outcome.quantity).filter(|q| q.value > 0.0)
+        reading(tokens, None, labelled).map(|outcome| outcome.quantity).filter(|q| q.value > 0.0 && q.im == 0.0)
     };
 
     if let Some(to) = level(unit) {
@@ -1480,7 +1623,7 @@ fn shown_as_is(value: f64, unit: &str) -> Answer {
     } else {
         format!("{}{:.*e}", sign_of(value), (sig_figs() - 1) as usize, magnitude)
     };
-    Answer { number, unit: unit.into(), copy: plain_copy(value) }
+    Answer::real(number, unit.into(), plain_copy(value))
 }
 
 /// Engineering notation with an automatic SI prefix. Copying gives the full
@@ -1488,7 +1631,7 @@ fn shown_as_is(value: f64, unit: &str) -> Answer {
 fn shown_with_prefix(value: f64, unit: &str) -> Answer {
     let value = round_sig(value);
     if value == 0.0 {
-        return Answer { number: "0".into(), unit: unit.into(), copy: "0".into() };
+        return Answer::real("0".into(), unit.into(), "0".into());
     }
     let magnitude = value.abs();
     let sign = sign_of(value);
@@ -1496,7 +1639,7 @@ fn shown_with_prefix(value: f64, unit: &str) -> Answer {
 
     // A plain number of ordinary size reads best with no prefix at all.
     if unit.is_empty() && (0.1..1000.0).contains(&magnitude) {
-        return Answer { number: format!("{sign}{}", fixed_sig(magnitude)), unit: String::new(), copy };
+        return Answer::real(format!("{sign}{}", fixed_sig(magnitude)), String::new(), copy);
     }
 
     // The small tolerance keeps exact powers of ten (1000, 1e-6) from
@@ -1505,22 +1648,22 @@ fn shown_with_prefix(value: f64, unit: &str) -> Answer {
     // A plain number in the thousandths would get a lone "m", which reads as
     // metres. Write it out instead: 0.05000, not 50.00 m.
     if unit.is_empty() && exponent == -3 {
-        return Answer { number: format!("{sign}{}", fixed_sig(magnitude)), unit: String::new(), copy };
+        return Answer::real(format!("{sign}{}", fixed_sig(magnitude)), String::new(), copy);
     }
     if !(-15..=12).contains(&exponent) {
         // Beyond the prefixes: fall back to scientific notation.
-        return Answer {
-            number: format!("{sign}{:.*e}", (sig_figs() - 1) as usize, magnitude),
-            unit: unit.into(),
+        return Answer::real(
+            format!("{sign}{:.*e}", (sig_figs() - 1) as usize, magnitude),
+            unit.into(),
             copy,
-        };
+        );
     }
     let scale = 10f64.powi(exponent);
-    Answer {
-        number: format!("{sign}{}", fixed_sig(round_sig(magnitude / scale))),
-        unit: format!("{}{unit}", prefix_symbol(scale)),
+    Answer::real(
+        format!("{sign}{}", fixed_sig(round_sig(magnitude / scale))),
+        format!("{}{unit}", prefix_symbol(scale)),
         copy,
-    }
+    )
 }
 
 /// Picks the largest unit in which the value is at least 1.
@@ -1623,8 +1766,8 @@ fn attempt(
 
     let mut parser = Parser::new(expression, bare_m, names);
     parser.kelvin = kelvin;
-    let result = parser.sum()?;
-    if parser.pos != expression.len() || !parser.has_value || !result.value.is_finite() {
+    let result = parser.sum()?.settled();
+    if parser.pos != expression.len() || !parser.has_value || !result.value.is_finite() || !result.im.is_finite() {
         return None;
     }
     if !in_program && !parser.interesting && wanted.is_none() {
@@ -1643,7 +1786,9 @@ fn attempt(
     };
     let scale_typed = parser.celsius || parser.fahrenheit;
 
-    let answer = if result.dim == TEMPERATURE && target.is_none() {
+    let answer = if result.im != 0.0 {
+        shown_complex(result, target.as_ref(), parser.joules)?
+    } else if result.dim == TEMPERATURE && target.is_none() {
         shown_temperature(result, to_scale, parser.typed_scale(), scale_typed)?
     } else if result.reading.is_some() {
         return None;
@@ -1678,13 +1823,13 @@ fn attempt(
                 let label = format!("{}{}", unit.names[0], superscript(power));
                 shown_as_is(result.value / unit.factor.powi(power), &label)
             }
-            // In a program, an in-between value may have a unit with no
-            // name (mA/V² for a MOSFET's k). It is shown in SI base units
-            // and labelled as such, so the steps after it can still run.
             // Typed input only: what a program shows is as it was.
             _ if !in_program && result.dim == FREQUENCY && !parser.counts_cycles() => {
                 shown_as_is(result.value, "s⁻¹")
             }
+            // In a program, an in-between value may have a unit with no
+            // name (mA/V² for a MOSFET's k). It is shown in SI base units
+            // and labelled as such, so the steps after it can still run.
             _ => match shown_by_default(result.value, result.dim, parser.joules) {
                 Some(answer) => answer,
                 None if in_program => shown_as_is(result.value, "(SI)"),
@@ -1703,6 +1848,41 @@ fn attempt(
         mechanical: parser.mechanical || target.as_ref().is_some_and(|t| t.mechanical),
         scale_typed,
         k_rate: parser.k_rate,
+    })
+}
+
+/// A complex result. The big line is its magnitude and angle, which are
+/// what is measured; the real and imaginary parts go on a line beneath, in
+/// the same unit and prefix. Copying gives the magnitude.
+fn shown_complex(z: Quantity, target: Option<&Target>, joules: bool) -> Option<Answer> {
+    let size = z.magnitude();
+    let (shown, scale) = match target {
+        Some(target) => {
+            if z.dim != target.dim {
+                return None;
+            }
+            (shown_as_is(size / target.factor, &target.label), target.factor)
+        }
+        None => {
+            let shown = shown_by_default(size, z.dim, joules)?;
+            // What the magnitude was divided by to be shown: the prefix.
+            let number: f64 = shown.number.replace('−', "-").parse().ok()?;
+            let scale = 10f64.powf((size / number).log10().round());
+            // Only a prefix will do: the parts must be in the same unit.
+            if !scale.is_normal() || (size / number / scale - 1.0).abs() > 0.01 {
+                return None;
+            }
+            (shown, scale)
+        }
+    };
+    let part = |value: f64| shown_as_is(value / scale, "").number;
+    let unit = if shown.unit.is_empty() { String::new() } else { format!(" {}", shown.unit) };
+    let sign = if z.im < 0.0 { '−' } else { '+' };
+    let degrees = z.im.atan2(z.value).to_degrees();
+    Some(Answer {
+        angle: Some(format!("{}°", shown_as_is(degrees, "").number)),
+        parts: Some(format!("{} {sign} j{}{unit}", part(z.value), part(z.im.abs()))),
+        ..shown
     })
 }
 
@@ -1818,7 +1998,8 @@ pub fn evaluate_with_value(input: &str) -> Option<(Answer, f64)> {
         return Some(found);
     }
     let split = conversion_split(&tokens);
-    reading(&tokens, split, labelled).map(|outcome| (outcome.answer, outcome.quantity.value))
+    // For a complex answer the value is its magnitude.
+    reading(&tokens, split, labelled).map(|outcome| (outcome.answer, outcome.quantity.magnitude_or_value()))
 }
 
 /// Works out typed input, or a part of it, as ordinary maths. `split` is
@@ -2051,6 +2232,15 @@ mod tests {
     #[track_caller]
     fn check(input: &str, expected: &str) {
         assert_eq!(show(input).as_deref(), Some(expected), "for {input:?}");
+    }
+
+    /// A complex answer in full: the big line, then the line beneath it.
+    #[track_caller]
+    fn check_complex(input: &str, polar: &str, parts: &str) {
+        let answer = evaluate(input).unwrap_or_else(|| panic!("no answer for {input:?}"));
+        let big = format!("{} {} ∠ {}", answer.number, answer.unit, answer.angle.as_deref().unwrap_or("?"));
+        assert_eq!(big.replace("  ", " "), polar, "for {input:?}");
+        assert_eq!(answer.parts.as_deref(), Some(parts), "for {input:?}");
     }
 
     #[track_caller]
@@ -2338,6 +2528,105 @@ mod tests {
         refuse("2V / 1V + 1 to dB");
         refuse("2V / 1V / 1V to dB");
         refuse("2V / 1V (3) to dB");
+    }
+
+    #[test]
+    fn complex_numbers() {
+        // j after the number, before it, and on its own.
+        check_complex("3 + 4j", "5.000 ∠ 53.13°", "3.000 + j4.000");
+        check_complex("3 + j4", "5.000 ∠ 53.13°", "3.000 + j4.000");
+        check_complex("3 + 4*j", "5.000 ∠ 53.13°", "3.000 + j4.000");
+        check_complex("3 - j4", "5.000 ∠ −53.13°", "3.000 − j4.000");
+        check_complex("j", "1.000 ∠ 90.00°", "0 + j1.000");
+        check_complex("-j2", "2.000 ∠ −90.00°", "0 − j2.000");
+        // Arithmetic.
+        check_complex("(3 + 4j) * (1 - 2j)", "11.18 ∠ −10.30°", "11.00 − j2.000");
+        check_complex("(3 + 4j) / (1 - 2j)", "2.236 ∠ 116.6°", "−1.000 + j2.000");
+        check_complex("(1 + j)^2", "2.000 ∠ 90.00°", "0 + j2.000");
+        check_complex("sqrt(-3 + 4j)", "2.236 ∠ 63.43°", "1.000 + j2.000");
+        check_complex("1/(1 + j)", "0.7071 ∠ −45.00°", "0.5000 − j0.5000");
+        // A result with no imaginary part left is an ordinary number.
+        check("j * j", "−1.000");
+        check("(1 + j) * (1 - j)", "2.000");
+        check("(3 + 4j) - 4j", "3.000");
+        // Impedances.
+        check_complex("10kohm + 1/(j*2*pi*1kHz*100nF)", "10.13 kΩ ∠ −9.043°", "10.00 − j1.592 kΩ");
+        check_complex("10kohm + j*2*pi*1kHz*100mH", "10.02 kΩ ∠ 3.595°", "10.00 + j0.6283 kΩ");
+        check_complex("1kohm || j*2*pi*2kHz*100mH", "782.5 Ω ∠ 38.51°", "612.3 + j487.2 Ω");
+        check_complex("j*2*pi*1kHz*100mH", "628.3 Ω ∠ 90.00°", "0 + j628.3 Ω");
+        check_complex("Z = 10kohm - j1.5916kohm", "10.13 kΩ ∠ −9.043°", "10.00 − j1.592 kΩ");
+        check_complex("5 V / (10kohm + j*2*pi*1kHz*100mH)", "499.0 µA ∠ −3.595°", "498.0 − j31.29 µA");
+        check_complex("(3 + 4j) kohm to ohm", "5000 Ω ∠ 53.13°", "3000 + j4000 Ω");
+        // What copy gives: the magnitude, as shown.
+        assert_eq!(copied("3 + 4j").as_deref(), Some("5"));
+        assert_eq!(copied("10kohm + 1/(j*2*pi*1kHz*100nF)").as_deref(), Some("10130"));
+        // The value handed on for checking is the magnitude.
+        let (_, value) = evaluate_with_value("3 + 4j").unwrap();
+        assert!((value - 5.0).abs() < 1e-12);
+
+        // Ambiguous after a division, as `1/2pi` is.
+        refuse("1/4j");
+        // Unlike things, and things that are never complex.
+        refuse("3 V + 4j");
+        refuse("25 C + j*5 kelvin");
+        refuse("(3 + 4j)%");
+        refuse("ln(3 + 4j)");
+        refuse("sin(j)");
+        refuse("(3 + 4j) V to dBV");
+        refuse("(3 + 4j) / 0");
+        // `i` is not the imaginary unit here, and `J` is the joule.
+        refuse("3 + 4i");
+        check("3 J + 4J", "7.000 J");
+    }
+
+    #[test]
+    fn magnitude_and_angle() {
+        // Entered with the angle sign, or with @.
+        check_complex("10 ∠ 30°", "10.00 ∠ 30.00°", "8.660 + j5.000");
+        check_complex("10 @ 30 deg", "10.00 ∠ 30.00°", "8.660 + j5.000");
+        check_complex("10@30deg", "10.00 ∠ 30.00°", "8.660 + j5.000");
+        check_complex("230 V @ 120°", "230.0 V ∠ 120.0°", "−115.0 + j199.2 V");
+        check_complex("5 @ 0.5 rad", "5.000 ∠ 28.65°", "4.388 + j2.397");
+        check_complex("10 @ -30 deg", "10.00 ∠ −30.00°", "8.660 − j5.000");
+        check_complex("10 @ 90°", "10.00 ∠ 90.00°", "0 + j10.00");
+        check_complex("2 * 10 @ 30 deg", "20.00 ∠ 30.00°", "17.32 + j10.00");
+        check_complex("230 V @ 0° - 230 V @ 120°", "398.4 V ∠ −30.00°", "345.0 − j199.2 V");
+        check_complex("(10 @ 30°) / (2 @ 10°)", "5.000 ∠ 20.00°", "4.698 + j1.710");
+        check_complex("e^(j*pi/3)", "1.000 ∠ 60.00°", "0.5000 + j0.8660");
+        check_complex("10 * exp(j * 30 deg / 1 rad)", "10.00 ∠ 30.00°", "8.660 + j5.000");
+        // No imaginary part: an ordinary number.
+        check("10 @ 180°", "−10.00");
+        check("10 @ 0 deg", "10.00");
+        // Taken apart.
+        check("abs(3 + 4j)", "5.000");
+        check("re(3 + 4j)", "3.000");
+        check("im(3 + 4j)", "4.000");
+        check("arg(3 + 4j)", "53.13 deg");
+        check("phase(10kohm + 1/(j*2*pi*1kHz*100nF))", "−9.043 deg");
+        check("arg(3 + 4j) to rad", "0.9273 rad");
+        check_complex("conj(3 + 4j)", "5.000 ∠ −53.13°", "3.000 − j4.000");
+        check("abs(1/(1 + j*2*pi*5kHz*10kohm*10nF))", "0.3033");
+        check("20*log(abs(1/(1 + j*2*pi*5kHz*10kohm*10nF)))", "−10.36");
+
+        // The angle must say what it is in.
+        refuse("10 @ 30");
+        refuse("10 ∠ 30");
+        refuse("10 @ 30 V");
+        // The magnitude is an ordinary value, and nothing has no angle.
+        refuse("(3 + 4j) @ 30 deg");
+        refuse("arg(0)");
+    }
+
+    #[test]
+    fn programs_have_no_complex_numbers() {
+        // Claude works out the parts as separate steps, as it is told to.
+        assert!(run(&[expression("Z_t", "3 + 4j")]).is_err());
+        assert!(run(&[expression("Z_t", "j*2*pi*1kHz*100mH")]).is_err());
+        assert!(run(&[expression("Z_t", "10 @ 30 deg")]).is_err());
+        assert!(run(&[expression("Z_t", "re(3)")]).is_err());
+        // A step may still have a name that typed input uses as a function.
+        assert_eq!(run(&[expression("phase", "atan(1) * 1rad")]).unwrap(), ["0.7854 rad"]);
+        assert_eq!(run(&[expression("re", "3 ohm"), expression("im", "4 ohm")]).unwrap(), ["3.000 Ω", "4.000 Ω"]);
     }
 
     #[test]

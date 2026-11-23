@@ -23,6 +23,7 @@ const readout = el<HTMLElement>("readout");
 const answer = el<HTMLElement>("answer");
 const num = el<HTMLElement>("num");
 const unit = el<HTMLElement>("unit");
+const angle = el<HTMLElement>("angle");
 const copied = el<HTMLElement>("copied");
 const also = el<HTMLElement>("also");
 const formula = el<HTMLElement>("formula");
@@ -51,8 +52,18 @@ const settingsNote = el<HTMLElement>("settings-note");
 
 // ---- what the Rust side sends --------------------------------------------
 
-/** A number as shown, with a plain version for the clipboard. */
-type Value = { name?: string; number: string; unit: string; copy: string; si_value?: number };
+/** A number as shown, with a plain version for the clipboard. A complex
+ *  answer from the instant path has its magnitude as the number, and also
+ *  its angle (`−9.043°`) and its parts (`10.00 − j1.592 kΩ`). */
+type Value = {
+  name?: string;
+  number: string;
+  unit: string;
+  copy: string;
+  si_value?: number;
+  angle?: string;
+  parts?: string;
+};
 
 /** One answer, several of equal standing, or two values compared. */
 type Layout = "single" | "list" | "compare";
@@ -233,7 +244,10 @@ function render() {
   if (shown) {
     num.textContent = shown.number;
     unit.textContent = shown.unit;
-    answer.classList.toggle("long", shown.number.length + shown.unit.length > 11);
+    angle.textContent = shown.angle ? `∠ ${shown.angle}` : "";
+    angle.hidden = !shown.angle;
+    const length = shown.number.length + shown.unit.length + (shown.angle ? shown.angle.length + 3 : 0);
+    answer.classList.toggle("long", length > 11);
     answer.setAttribute("aria-label", `Copy ${shown.copy}`);
 
     // A list shows its answers as rows and no single big number. A
@@ -258,12 +272,14 @@ function render() {
     const host = isList ? readout : single;
     if (toggle.parentElement !== host) host.append(toggle);
 
+    // A complex answer's real and imaginary parts go first, on their own.
     also.replaceChildren(
+      ...(shown.parts ? [line("also-line parts", shown.parts)] : []),
       ...(shown.also ?? []).map((value) =>
         line("also-line", ...mathNodes(value.name ?? ""), ` = ${spaced(value)}`),
       ),
     );
-    also.hidden = !shown.also?.length;
+    also.hidden = !shown.parts && !shown.also?.length;
 
     formula.replaceChildren(...mathNodes(shown.formula ?? ""));
     formula.hidden = !shown.formula;

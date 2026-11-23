@@ -5,14 +5,15 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-22, version 0.10.1): everything on the first roadmap is
-built, for the Claude Code route. 0.9.2 was the first public release, and
-0.10.1 is the current release, published 2026-11-22 (see "Release"). 0.10.0 and
-0.10.1 add decibels, temperature sums and conversions between rpm and Hz
-to the instant path (see "Instant path"). Not built: the API-key route,
-signing, memory.
-The roadmap was revised on 2026-11-22, after that release (see "Roadmap").
-Next: complex numbers.
+Status (2026-11-22, version 0.11.0, not released): everything on the first
+roadmap is built, for the Claude Code route. 0.9.2 was the first public
+release, and 0.10.1 is the current one, published 2026-11-22 (see
+"Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
+conversions between rpm and Hz to the instant path, and 0.11.0 adds
+complex numbers (see "Instant path"). That completes item 2 of the
+roadmap. Not built: the API-key route, signing, memory.
+The roadmap was revised on 2026-11-22 (see "Roadmap").
+Next: item 3, getting it used.
 
 ## Purpose
 
@@ -444,6 +445,18 @@ What it answers, as you type:
   - one quantity over another of the same kind: `2V / 1V to dB` is
     6.021 dB (20·log for voltage and current), `10W / 1W to dB` is
     10.00 dB (10·log for power).
+- **Complex numbers** (0.11.0, decided by the user 2026-11-22):
+  - `j` is the imaginary unit, after a number, in front of one, or on
+    its own: `3 + 4j`, `3 + j4`, `j*2*pi*1kHz*100mH`. In front of a
+    number it takes that number, and its unit, with it;
+  - impedances: `10kohm + 1/(j*2*pi*1kHz*100nF)` is 10.13 kΩ ∠ −9.043°,
+    and `1kohm || j*2*pi*2kHz*100mH` is 782.5 Ω ∠ 38.51°;
+  - a magnitude and an angle, with `∠` or with `@`, which is the same
+    thing on any keyboard: `230 V @ 120°`, `10 ∠ 30 deg`,
+    `5 @ 0.5 rad`;
+  - `abs`, `arg` (or `phase`), `re`, `im` and `conj` take one apart.
+    `arg` answers in degrees. `exp` and `^` take a complex power of a
+    plain number: `e^(j*pi/3)`.
 - **Operators:** `+ - * / ^`, brackets, `||` for parallel, `√`, `×`, `÷`,
   `π`. Also `x` for multiply, `²` and `³`, and `%`.
 - **Functions:** `sqrt ln log exp sin cos tan asin acos atan abs`. `log` is
@@ -576,18 +589,52 @@ Rules:
   Every reference problem was put through the instant path alone: it
   answers three now (`250mW in dBm` is the new one), all correctly, and
   none that it should leave to Claude.
+- **A complex answer is shown as its magnitude and angle**, with its real
+  and imaginary parts on a small line beneath:
+  `10.13 kΩ ∠ −9.043°` over `10.00 − j1.592 kΩ`. The user had no
+  preference between this and the other way up; magnitude and angle were
+  put first because they are what is measured.
+  - The angle is in degrees. The parts share the magnitude's unit and
+    prefix.
+  - Copying gives the magnitude, a plain number as for every other
+    answer.
+  - This is the one instant answer with a second line.
+  - A result whose imaginary part has gone is an ordinary number:
+    `(1 + j) * (1 - j)` is 2.000 and `10 @ 180°` is −10.00. A part that
+    is only rounding noise beside the other is taken as zero, so
+    `10 @ 90°` is j10.
+- **What is refused with complex numbers:**
+  - `i` for the imaginary unit: it reads as a current. `J` is the joule;
+  - `1/4j`, which could be 1/(4j) or (1/4)j, as `1/2pi` is refused;
+  - an angle with no unit (`10 @ 30`): it could be degrees or radians;
+  - a complex magnitude before the angle sign;
+  - `ln`, `log` and the trig functions of a complex number, a complex
+    percentage, a complex temperature, and a complex value as a level in
+    decibels;
+  - a complex flow, which would be shown in L/min: the parts could not
+    share that unit by a prefix alone.
+- A complex value is shown in the SI unit with a prefix, not in the unit
+  typed: `(3 + 4j) psi` is 34.47 kPa ∠ 53.13°. Asked for with `to`, it is
+  in that unit.
+- **Complex numbers are for typed input only.** The language Claude
+  writes its formulas in has none: it is told to work out the real part,
+  the imaginary part, the magnitude and the angle as separate steps, and
+  its instructions are unchanged. A step of a program may still be named
+  `phase`, `re` or `im`.
 - **Energy and torque share dimensions.** A result is labelled J when the
   input used electrical, power or energy units, and N·m otherwise.
 - **What copy gives:** the number as shown when the unit was asked for or
   typed (`1 in to mm` copies `25.4`); the full value in the unprefixed unit
-  when a prefix was added automatically (`47.00 nF` copies `4.7e-8`).
+  when a prefix was added automatically (`47.00 nF` copies `4.7e-8`). For
+  a complex answer, the magnitude, by the same rule.
 - A bare number on its own gives no answer.
 - Standard operator precedence applies. `1/2*pi` is (1/2)×π. A power on a
   unit belongs to the unit: `5 m^2` is five square metres.
 - While the input is being edited and is not valid, the previous answer
   stays in place but dimmed, and cannot be copied. A dimmed answer is never
   current.
-- Instant answers have no steps and no notes.
+- Instant answers have no steps and no notes. A complex one has its
+  parts on a second line.
 - A plain number between 0.1 and 1000 is shown without a prefix (`0.1250`,
   `338.6`); everything else uses engineering notation (`5.998 k`).
 - A plain number in the thousandths is written out (`0.05000`), never given
@@ -596,8 +643,16 @@ Rules:
 - `gal` is the US gallon and `hp` is mechanical horsepower (745.7 W);
   metric horsepower is `PS`.
 
-Not in the instant path: complex numbers, variables, the decimal comma,
-and a plain ratio in decibels. Those go to Claude.
+Not in the instant path: variables, the decimal comma, and a plain ratio
+in decibels. Those go to Claude.
+
+Checked for 0.11.0 (2026-11-22): 64 unit tests, of which three groups are
+new (complex numbers, magnitude and angle, and that programs have
+neither), with the expected values worked out by hand; every reference
+problem through the instant path alone, with the same three answered as
+before; and eleven inputs typed into the window in the built-in browser,
+where the angle sits on the big line and the parts on the line beneath.
+Not checked: the real app, and the window in the light theme.
 
 Checked for 0.10.1 (2026-11-22): 61 unit tests, of which four groups are
 new (rotation and frequency, that programs do not convert between them,
@@ -1390,7 +1445,8 @@ and has not broken an earlier item.
      `to Nm` on torque and speed. Torque times speed is unchanged. A bare
      "per second" is no longer called hertz, and power over rotation is
      shown as a torque. In the 0.10.1 release.
-   - Left: complex numbers and impedance.
+   - *Built 2026-11-22, in 0.11.0:* complex numbers and impedance (see
+     "Instant path"). Not released. Item 2 is complete.
 3. **Get it used, then apply for signing.** The author posts it where
    engineers would use it. When there are stars, downloads or discussion
    to point to, apply to SignPath (what to do then is under "Release").

@@ -17,18 +17,22 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.10.1, the current release (2026-11-22). Work follows
+Version 0.11.0, not released; 0.10.1 is the current release. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-22:
 
 - The first roadmap is built: the instant path, session history, a
   movable window, the system theme, the installer, Claude through the
   user's Claude Code, pasted pictures, the settings screen, the error
   states, the content security policy and the README.
-- Item 2 of the revised roadmap, widening the instant path, is under way.
-  Decibels and temperature sums (0.10.0) and conversions between rpm and
-  Hz (0.10.1) are built. Next: complex numbers. All three are for typed
-  input only: the language Claude writes formulas in has no temperature
-  or decibel units and does not convert between rpm and Hz.
+- Item 2 of the revised roadmap, widening the instant path, is built:
+  decibels and temperature sums (0.10.0), conversions between rpm and Hz
+  (0.10.1) and complex numbers (0.11.0). All are for typed input only:
+  the language Claude writes formulas in has no temperature or decibel
+  units, no complex numbers, and does not convert between rpm and Hz.
+  Next is item 3, getting it used.
+- A complex answer carries `angle` and `parts` beside the number and
+  unit (`Answer` in `calc.rs`, `Value` in `main.ts`). The window puts the
+  angle on the big line and the parts on a line beneath.
 - The installer is unsigned. The application for signing is held until
   there is use to show; see "Release" in `SPEC.md`.
 - The API-key route is not built. It is item 4.

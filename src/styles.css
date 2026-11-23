@@ -432,6 +432,24 @@ sub {
   color: var(--soft);
 }
 
+/* The angle of a complex answer. It is part of the value, so it keeps the
+   answer's colour, at the unit's size so the magnitude still leads. */
+.angle {
+  font: 400 22px/1 var(--mono);
+}
+
+/* A plain number has no unit: leave no gap for one before the angle. */
+.unit:empty {
+  display: none;
+}
+
+/* The real and imaginary parts are numbers, so they are set like the
+   answer above them and not like the maths in Claude's lines. */
+.also-line.parts {
+  font-family: var(--mono);
+  color: var(--soft);
+}
+
 .copied {
   font: 12px/1 var(--mono);
   color: var(--accent);
