@@ -5,10 +5,10 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-22, version 0.11.0, not released): everything on the first
-roadmap is built, for the Claude Code route. 0.9.2 was the first public
-release, and 0.10.1 is the current one, published 2026-11-22 (see
-"Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
+Status (2026-11-22, version 0.11.0): everything on the first roadmap is
+built, for the Claude Code route. 0.9.2 was the first public release,
+0.10.1 followed on 2026-11-22, and 0.11.0 was tagged for release the same
+day (see "Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
 conversions between rpm and Hz to the instant path, and 0.11.0 adds
 complex numbers (see "Instant path"). That completes item 2 of the
 roadmap. Not built: the API-key route, signing, memory.
@@ -257,6 +257,10 @@ public.
   - **Published 2026-11-22** on the user's word. Checked without signing
     in: it is the latest release, and the downloaded installer's SHA-256
     is the one in `SHA256SUMS.txt`.
+- **0.11.0**, tagged 2026-11-22 on the user's word, to try complex
+  numbers in the installed app. It is the first of these changes to
+  touch the window: a complex answer has a second line, which had been
+  seen only in the built-in browser.
 - **Published 2026-11-21**, on the user's word, after the user installed
   the 0.9.2 installer from the draft and found it working. Checked
   without signing in: the repository page, the README's pictures and the
@@ -1446,7 +1450,7 @@ and has not broken an earlier item.
      "per second" is no longer called hertz, and power over rotation is
      shown as a torque. In the 0.10.1 release.
    - *Built 2026-11-22, in 0.11.0:* complex numbers and impedance (see
-     "Instant path"). Not released. Item 2 is complete.
+     "Instant path"). In the 0.11.0 release. Item 2 is complete.
 3. **Get it used, then apply for signing.** The author posts it where
    engineers would use it. When there are stars, downloads or discussion
    to point to, apply to SignPath (what to do then is under "Release").
