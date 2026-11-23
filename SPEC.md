@@ -5,12 +5,13 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-21, version 0.9.2): everything on the roadmap up to the
-README is built, for the Claude Code route, and 0.9.2 is the first public
-release (see "Release"). It added limits on Claude's reply (see "Solver").
-Not built: the API-key route, signing, memory.
+Status (2026-11-22, version 0.10.0, not released): everything on the first
+roadmap is built, for the Claude Code route, and 0.9.2 is the first public
+release (see "Release"). 0.10.0 adds decibels and temperature sums to the
+instant path (see "Instant path"). Not built: the API-key route, signing,
+memory.
 The roadmap was revised on 2026-11-22, after that release (see "Roadmap").
-Next: widening the instant path.
+Next: `rpm to Hz`, then complex numbers.
 
 ## Purpose
 
@@ -408,8 +409,26 @@ What it answers, as you type:
   Units combine: `6 bar * pi * (25mm)^2` is 1.178 kN.
 - **Conversions:** `3.5 bar to psi`, `12 L/min to gpm`, `2 in² to cm²`.
   `in` works as well as `to` where it cannot mean inches.
-- **Temperature:** only as a direct conversion, `100 C to F`, because
-  temperature scales have offsets.
+- **Temperature** (widened in 0.10.0, decided by the user 2026-11-22):
+  - a direct conversion, `100 C to F`, as before;
+  - a temperature with a rise added or taken away:
+    `25 C + 2 W * 50 C/W` is 125.0 °C;
+  - one temperature less another, which is a difference and is marked as
+    one: `85 C - 25 C` is 60.00 Δ°C;
+  - differences multiplied and divided like any quantity:
+    `(150 C - 25 C) / 62 C/W` is 2.016 W, `(150 C - 25 C) / 2 W` is
+    62.50 °C/W, `8 mW/C * (85 C - 25 C)` is 480.0 mW.
+- **Decibels** (0.10.0, decided by the user 2026-11-22):
+  - a value as a level: `250mW in dBm` is 23.98 dBm. The levels are dBm,
+    dBW, dBV and dBu;
+  - a level as a value: `+4 dBu in V` is 1.228 V, and `10 dBm` alone is
+    10.00 mW;
+  - one level as another of the same kind: `-10 dBV to dBu` is
+    −7.782 dBu;
+  - gains added to a level or taken away: `10 dBm + 3 dB` is 13.00 dBm;
+  - one quantity over another of the same kind: `2V / 1V to dB` is
+    6.021 dB (20·log for voltage and current), `10W / 1W to dB` is
+    10.00 dB (10·log for power).
 - **Operators:** `+ - * / ^`, brackets, `||` for parallel, `√`, `×`, `÷`,
   `π`. Also `x` for multiply, `²` and `³`, and `%`.
 - **Functions:** `sqrt ln log exp sin cos tan asin acos atan abs`. `log` is
@@ -451,6 +470,56 @@ Rules:
 - **rpm is an angular speed and Hz is not.** They differ by 2π, so
   `1500 rpm to Hz` is refused, while `10 N·m * 1500 rpm` correctly gives
   1.571 kW.
+- **A temperature on the Celsius or Fahrenheit scale is a point, not an
+  amount.** It can have a difference added or taken away, and two can be
+  subtracted. Two cannot be added, and one cannot be multiplied, divided,
+  raised to a power or put through a function: `20 C + 5 C`, `25 C * 2`
+  and `1.38e-23 J/kelvin * 27 C` are refused. A difference less a
+  temperature is refused too.
+  - A number of kelvin is an ordinary quantity, since kelvin has no zero
+    of its own to allow for.
+  - `50 C/W` is one quantity. A number, a temperature word, a `/` and a
+    unit straight after it are a rise per that unit, whatever came before:
+    `(150 C - 25 C) / 62 C/W` divides by all of 62 °C/W. This is the one
+    place where a unit after a `/` is taken before the usual order of
+    working.
+  - A temperature word with no number is one degree of difference, as in
+    `8 mW/C`.
+  - A difference is shown in the scale typed, marked `Δ°C` or `Δ°F` so it
+    is not read as a temperature, or in K when only kelvin was typed or
+    the scales were mixed. Asked for with `to`, it converts as a
+    difference: `85 C - 25 C to F` is 108.0 Δ°F.
+  - A result that is only a number of kelvin is not converted to °C or
+    °F, except in the direct form (`300 K to C`), because it could be a
+    temperature or a difference and the two convert differently.
+  - A rise per watt is shown as °C/W, °F/W or K/W by the same rule.
+  - `C` after a number is Celsius; the coulomb cannot be typed. `F` is the
+    farad, so Fahrenheit is `°F` or `degF`, except in a direct conversion
+    and after `to`. A Fahrenheit difference cannot be typed directly; it
+    comes from subtracting two temperatures or from a rate.
+- **A lone `K` is kilo or kelvin.** Kilo is tried first, so `4.7K`,
+  `300 K * 2` and `12 V / 4.7K` are as they were. It is kelvin where kilo
+  gives no answer (`25 C + 10 K` is 35.00 °C). Where both readings work it
+  is kelvin beside a Celsius or Fahrenheit temperature, and where it is
+  written as a rate: `2 W * 40 K/W` is 80.00 K. Before 0.10.0 that input
+  gave 80.00 k. `kelvin` written out is always kelvin.
+- **Decibels are whole patterns, never mixed into a sum.** The forms
+  listed above are the only ones. Refused:
+  - a plain number to dB (`47 in dB`), because it could be 20·log or
+    10·log;
+  - decibels alone (`6 dB`), and gains summed without a level;
+  - levels added to each other or scaled (`10 dBm + 20 dBm`);
+  - a power level to a voltage level, which needs an impedance;
+  - a ratio with anything after it that the usual order of working would
+    attach to it (`2V / 1V * 3 to dB`). What is under the line must be
+    one value with its unit, or one pair of brackets;
+  - `dBv` with a small v alone, an old name for dBu.
+- **Temperatures and decibels are for typed input only.** The language
+  Claude writes its formulas in has neither, and its instructions are
+  unchanged, so the reference set was not run through a model for 0.10.0.
+  Every reference problem was put through the instant path alone: it
+  answers three now (`250mW in dBm` is the new one), all correctly, and
+  none that it should leave to Claude.
 - **Energy and torque share dimensions.** A result is labelled J when the
   input used electrical, power or energy units, and N·m otherwise.
 - **What copy gives:** the number as shown when the unit was asked for or
@@ -471,9 +540,15 @@ Rules:
 - `gal` is the US gallon and `hp` is mechanical horsepower (745.7 W);
   metric horsepower is `PS`.
 
-Not in the instant path: complex numbers, decibels, variables, the decimal
-comma, temperature differences, conversions between rpm and Hz. Those go to
+Not in the instant path: complex numbers, variables, the decimal comma,
+conversions between rpm and Hz, and a plain ratio in decibels. Those go to
 Claude.
+
+Checked for 0.10.0 (2026-11-22): 57 unit tests, of which five groups are
+new (levels, ratios in decibels, temperatures and differences, the lone
+`K`, and that programs have neither); and ten of the examples above typed
+into the window in the built-in browser, each showing the number and unit
+given here. Not checked: the real app. The installed copy is still 0.9.2.
 
 ## Solver
 
@@ -1246,6 +1321,9 @@ and has not broken an earlier item.
    `1500 rpm to Hz` as 25 Hz without breaking torque times speed. Then
    complex numbers and impedance, which is the large one. Every new thing
    accepted or refused gets a unit test, and the evaluator stays strict.
+   - *Built 2026-11-22, in 0.10.0:* decibels and temperature sums (see
+     "Instant path"). Not released.
+   - Left: `rpm to Hz`, then complex numbers and impedance.
 3. **Get it used, then apply for signing.** The author posts it where
    engineers would use it. When there are stars, downloads or discussion
    to point to, apply to SignPath (what to do then is under "Release").

@@ -8,7 +8,9 @@ hand harder problems to Claude if you want it to.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.9.2, the first public release. It is one person's tool,
+Status: version 0.9.2 is the first public release. This page describes
+0.10.0, which is not released yet: it adds temperatures and decibels to
+what is answered as you type. It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
@@ -34,6 +36,11 @@ No account and no network. The answer changes with every key.
 | `3.5 bar to psi` | 50.76 psi |
 | `12 L/min to gpm` | 3.170 gal/min |
 | `100 C to F` | 212.0 °F |
+| `25 C + 2 W * 50 C/W` | 125.0 °C |
+| `(150 C - 25 C) / 62 C/W` | 2.016 W |
+| `250mW in dBm` | 23.98 dBm |
+| `10 dBm + 3 dB` | 13.00 dBm |
+| `2V / 1V to dB` | 6.021 dB |
 | `VGS = -0.3V * (1 - sqrt(0.1mA / 0.2mA))` | −87.87 mV |
 
 It understands:
@@ -46,6 +53,15 @@ It understands:
   rotation (deg, rad, rpm), volume and flow (L, gal, L/min, gpm, cfm), and
   speed. Volts times amps comes out in watts; volts plus amps is refused.
 - **Conversions** with `to` (or `in`): `25 mm to in`.
+- **Temperatures.** A temperature can have a rise added or taken away, so
+  junction and heatsink sums work. One temperature less another is a
+  difference, shown as `Δ°C` so it is not read as a temperature. Adding
+  two temperatures, or doubling one, is refused. Fahrenheit is `°F` or
+  `degF` in a sum, because `F` is the farad.
+- **Decibels.** Levels in dBm, dBW, dBV and dBu, both ways, and a level
+  with gains added or taken away. A ratio becomes decibels when both sides
+  have units, so it is known whether it is power or voltage; a bare
+  `47 in dB` is left to Claude.
 - `||` for parallel, `x` or `×` for multiply, `²` and `³`, `√`, `π`, `%`,
   and the usual functions (`sqrt ln log exp sin cos tan asin acos atan abs`).
 - **A name in front**, as you would write it on paper: `VGS = …`.
@@ -187,8 +203,8 @@ decided and why, and what has and has not been tested.
 - A way to use Claude without Claude Code installed.
 - Memory of your notation and preferences.
 - Not tested: Windows 10, and displays scaled above 125%.
-- Not in the instant path: complex numbers, decibels, temperature
-  differences, and conversions between rpm and Hz. Those go to Claude.
+- Not in the instant path: complex numbers, and conversions between rpm
+  and Hz. Those go to Claude.
 - Answers from Claude are checked against a set of 46 reference problems.
   The instructions given to Claude were tuned on that same set, so passing
   it says less than it seems to.

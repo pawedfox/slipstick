@@ -17,15 +17,17 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.9.2, the first public release. Work follows the "Roadmap"
-section of `SPEC.md`, in order. It was revised on 2026-11-22:
+Version 0.10.0, not released; 0.9.2 is the public release. Work follows
+the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-22:
 
 - The first roadmap is built: the instant path, session history, a
   movable window, the system theme, the installer, Claude through the
   user's Claude Code, pasted pictures, the settings screen, the error
   states, the content security policy and the README.
-- Next is item 2 of the revised roadmap: widening the instant path
-  (decibels, temperature differences, `rpm to Hz`, then complex numbers).
+- Item 2 of the revised roadmap, widening the instant path, is under way.
+  Decibels and temperature sums are built (0.10.0). Next: `rpm to Hz`,
+  then complex numbers. Both are for typed input only: the language
+  Claude writes formulas in has no temperature or decibel units.
 - The installer is unsigned. The application for signing is held until
   there is use to show; see "Release" in `SPEC.md`.
 - The API-key route is not built. It is item 4.

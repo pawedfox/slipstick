@@ -37,38 +37,42 @@ pub fn with_sig_figs<T>(figures: u8, work: impl FnOnce() -> T) -> T {
     result
 }
 
-/// Exponents of: kilogram, metre, second, ampere, angle.
+/// Exponents of: kilogram, metre, second, ampere, angle, kelvin.
 ///
 /// Angle is tracked as its own dimension so that `rpm` (an angular speed)
 /// cannot be silently mixed up with `Hz`; the two differ by 2π.
-type Dim = [i8; 5];
-const NO_DIM: Dim = [0; 5];
+type Dim = [i8; 6];
+const NO_DIM: Dim = [0; 6];
 const ANGLE: usize = 4;
 
-const LENGTH: Dim = [0, 1, 0, 0, 0];
-const AREA: Dim = [0, 2, 0, 0, 0];
-const VOLUME: Dim = [0, 3, 0, 0, 0];
-const MASS: Dim = [1, 0, 0, 0, 0];
-const TIME: Dim = [0, 0, 1, 0, 0];
-const FREQUENCY: Dim = [0, 0, -1, 0, 0];
-const SPEED: Dim = [0, 1, -1, 0, 0];
-const ACCELERATION: Dim = [0, 1, -2, 0, 0];
-const FLOW: Dim = [0, 3, -1, 0, 0];
-const FORCE: Dim = [1, 1, -2, 0, 0];
-const PRESSURE: Dim = [1, -1, -2, 0, 0];
-const ENERGY: Dim = [1, 2, -2, 0, 0];
-const POWER: Dim = [1, 2, -3, 0, 0];
-const CURRENT: Dim = [0, 0, 0, 1, 0];
-const CHARGE: Dim = [0, 0, 1, 1, 0];
-const VOLTAGE: Dim = [1, 2, -3, -1, 0];
-const RESISTANCE: Dim = [1, 2, -3, -2, 0];
-const CONDUCTANCE: Dim = [-1, -2, 3, 2, 0];
-const CAPACITANCE: Dim = [-1, -2, 4, 2, 0];
-const INDUCTANCE: Dim = [1, 2, -2, -2, 0];
-const MAGNETIC_FLUX: Dim = [1, 2, -2, -1, 0];
-const FLUX_DENSITY: Dim = [1, 0, -2, -1, 0];
-const ANGLE_DIM: Dim = [0, 0, 0, 0, 1];
-const ANGULAR_SPEED: Dim = [0, 0, -1, 0, 1];
+const LENGTH: Dim = [0, 1, 0, 0, 0, 0];
+const AREA: Dim = [0, 2, 0, 0, 0, 0];
+const VOLUME: Dim = [0, 3, 0, 0, 0, 0];
+const MASS: Dim = [1, 0, 0, 0, 0, 0];
+const TIME: Dim = [0, 0, 1, 0, 0, 0];
+const FREQUENCY: Dim = [0, 0, -1, 0, 0, 0];
+const SPEED: Dim = [0, 1, -1, 0, 0, 0];
+const ACCELERATION: Dim = [0, 1, -2, 0, 0, 0];
+const FLOW: Dim = [0, 3, -1, 0, 0, 0];
+const FORCE: Dim = [1, 1, -2, 0, 0, 0];
+const PRESSURE: Dim = [1, -1, -2, 0, 0, 0];
+const ENERGY: Dim = [1, 2, -2, 0, 0, 0];
+const POWER: Dim = [1, 2, -3, 0, 0, 0];
+const CURRENT: Dim = [0, 0, 0, 1, 0, 0];
+const CHARGE: Dim = [0, 0, 1, 1, 0, 0];
+const VOLTAGE: Dim = [1, 2, -3, -1, 0, 0];
+const RESISTANCE: Dim = [1, 2, -3, -2, 0, 0];
+const CONDUCTANCE: Dim = [-1, -2, 3, 2, 0, 0];
+const CAPACITANCE: Dim = [-1, -2, 4, 2, 0, 0];
+const INDUCTANCE: Dim = [1, 2, -2, -2, 0, 0];
+const MAGNETIC_FLUX: Dim = [1, 2, -2, -1, 0, 0];
+const FLUX_DENSITY: Dim = [1, 0, -2, -1, 0, 0];
+const ANGLE_DIM: Dim = [0, 0, 0, 0, 1, 0];
+const ANGULAR_SPEED: Dim = [0, 0, -1, 0, 1, 0];
+/// A difference in temperature, in kelvin.
+const TEMPERATURE: Dim = [0, 0, 0, 0, 0, 1];
+/// Kelvin per watt.
+const THERMAL_RESISTANCE: Dim = [-1, -2, 3, 0, 0, 1];
 
 #[derive(Clone, Copy, Debug)]
 struct Quantity {
@@ -78,15 +82,26 @@ struct Quantity {
     /// Written with a `%`. Adding a percentage to a plain number is
     /// ambiguous (`200 + 15%`), so that combination is refused.
     percent: bool,
+    /// Set when this is a reading on the Celsius or Fahrenheit scale, such
+    /// as `25 C`, and not an amount of temperature. `value` is then the
+    /// reading in kelvin-sized steps from that scale's own zero, so `25 C`
+    /// is 25 and `-40 °F` is -22.2. A reading can have a difference added
+    /// or taken away, and two readings can be subtracted. Nothing else.
+    reading: Option<Scale>,
 }
 
 impl Quantity {
     fn plain(value: f64) -> Self {
-        Self { value, dim: NO_DIM, percent: false }
+        Self::of(value, NO_DIM)
     }
 
     fn of(value: f64, dim: Dim) -> Self {
-        Self { value, dim, percent: false }
+        Self { value, dim, percent: false, reading: None }
+    }
+
+    /// The reading as an absolute temperature in kelvin.
+    fn kelvin(&self) -> Option<f64> {
+        self.reading.map(|scale| self.value + scale.zero())
     }
 }
 
@@ -536,6 +551,13 @@ struct Parser<'a> {
     typed: Vec<(usize, i32)>,
     /// How many signs, brackets, roots and powers deep the parser is now.
     depth: usize,
+    /// Read a lone `K` as kelvin. Otherwise it is the prefix kilo.
+    kelvin: bool,
+    /// The Celsius and Fahrenheit words the user typed.
+    celsius: bool,
+    fahrenheit: bool,
+    /// A lone `K` came straight before a `/` and a unit, as in `40 K/W`.
+    k_rate: bool,
 }
 
 /// The deepest nesting the parser will follow: about a hundred brackets
@@ -570,7 +592,74 @@ impl<'a> Parser<'a> {
             bare_prefix: false,
             typed: Vec::new(),
             depth: 0,
+            kelvin: false,
+            celsius: false,
+            fahrenheit: false,
+            k_rate: false,
         }
+    }
+
+    /// Reads a word as a temperature scale, where one can stand.
+    ///
+    /// `F` is the farad, so Fahrenheit is `°F` or `degF`. A lone `K` is
+    /// kelvin only in the reading that takes it so. Programs written by
+    /// Claude have no temperature units at all.
+    fn temperature_word(&mut self, word: &str) -> Option<Scale> {
+        if self.bare_m == BareM::Program {
+            return None;
+        }
+        let scale = match word {
+            "C" | "°C" | "degC" | "celsius" | "Celsius" => Scale::Celsius,
+            "°F" | "degF" | "fahrenheit" | "Fahrenheit" => Scale::Fahrenheit,
+            "kelvin" | "Kelvin" => Scale::Kelvin,
+            "K" if self.kelvin => Scale::Kelvin,
+            _ => return None,
+        };
+        self.celsius |= scale == Scale::Celsius;
+        self.fahrenheit |= scale == Scale::Fahrenheit;
+        Some(scale)
+    }
+
+    /// The one scale the user typed, out of Celsius and Fahrenheit, if they
+    /// typed only one. Kelvin does not count: it is the unit of difference.
+    fn typed_scale(&self) -> Option<Scale> {
+        match (self.celsius, self.fahrenheit) {
+            (true, false) => Some(Scale::Celsius),
+            (false, true) => Some(Scale::Fahrenheit),
+            _ => None,
+        }
+    }
+
+    /// Whether the next two tokens are a `/` and a unit with dimensions.
+    fn at_rate(&self) -> bool {
+        self.peek() == Some(&Token::Slash)
+            && matches!(self.tokens.get(self.pos + 1), Some(Token::Word(word)) if is_dimensioned_unit(word))
+    }
+
+    /// A number in front of a temperature word, `value` of them.
+    fn temperature(&mut self, value: f64, scale: Scale) -> Option<Quantity> {
+        let amount = Quantity::of(value * scale.degree(), TEMPERATURE);
+        // `50 C/W` is one quantity, a rise for each watt, however it is then
+        // used: `125 C / 62 C/W` divides by all of it. So the unit after the
+        // `/` is taken with the number here, and what is left is a
+        // difference.
+        if self.at_rate() {
+            self.pos += 1;
+            let Some(Token::Word(word)) = self.peek().cloned() else { return None };
+            self.pos += 1;
+            let (per, dim, index) = self.resolve(&word)?;
+            if dim == NO_DIM {
+                return None;
+            }
+            let (per, dim) = self.finish_unit(per, dim, index);
+            return divide(amount, Quantity::of(per, dim));
+        }
+        // Kelvin has no zero of its own to allow for, so a number of
+        // kelvin is an ordinary quantity.
+        Some(match scale {
+            Scale::Kelvin => amount,
+            scale => Quantity { reading: Some(scale), ..amount },
+        })
     }
 
     fn peek(&self) -> Option<&Token> {
@@ -599,10 +688,7 @@ impl<'a> Parser<'a> {
                 return Some(left);
             };
             let right = self.parallel()?;
-            if left.dim != right.dim || left.percent != right.percent {
-                return None;
-            }
-            left.value += sign * right.value;
+            left = add(left, right, sign)?;
         }
     }
 
@@ -611,7 +697,11 @@ impl<'a> Parser<'a> {
         let mut left = self.product()?;
         while self.take(Token::Parallel) {
             let right = self.product()?;
-            if left.dim != right.dim || left.value + right.value == 0.0 {
+            if left.dim != right.dim
+                || left.value + right.value == 0.0
+                || left.reading.is_some()
+                || right.reading.is_some()
+            {
                 return None;
             }
             left = Quantity::of(left.value * right.value / (left.value + right.value), left.dim);
@@ -624,7 +714,7 @@ impl<'a> Parser<'a> {
         let mut after_division = false;
         loop {
             if self.take(Token::Star) {
-                left = multiply(left, self.unary()?);
+                left = multiply(left, self.unary()?)?;
                 after_division = false;
             } else if self.take(Token::Slash) {
                 left = divide(left, self.unary()?)?;
@@ -639,7 +729,7 @@ impl<'a> Parser<'a> {
                     return None;
                 }
                 self.interesting = true;
-                left = multiply(left, self.power()?);
+                left = multiply(left, self.power()?)?;
             } else {
                 return Some(left);
             }
@@ -669,7 +759,7 @@ impl<'a> Parser<'a> {
             if base.dim != NO_DIM {
                 return None;
             }
-            base = Quantity { value: base.value / 100.0, dim: NO_DIM, percent: true };
+            base = Quantity { percent: true, ..Quantity::plain(base.value / 100.0) };
         }
         if let Some(&Token::Super(n)) = self.peek() {
             self.pos += 1;
@@ -763,9 +853,17 @@ impl<'a> Parser<'a> {
             Token::Number(value) => {
                 self.has_value = true;
                 if let Some(Token::Word(word)) = self.peek().cloned()
+                    && let Some(scale) = self.temperature_word(&word)
+                {
+                    self.pos += 1;
+                    self.interesting = true;
+                    return self.temperature(value, scale);
+                }
+                if let Some(Token::Word(word)) = self.peek().cloned()
                     && let Some((scale, dim, index)) = self.resolve(&word)
                 {
                     self.pos += 1;
+                    self.k_rate |= word == "K" && self.at_rate();
                     self.interesting = true;
                     let (scale, dim) = self.finish_unit(scale, dim, index);
                     return Some(Quantity::of(value * scale, dim));
@@ -809,6 +907,12 @@ impl<'a> Parser<'a> {
                     }
                     return apply(&word, argument);
                 }
+                // A temperature word on its own is one degree of difference,
+                // as in `8 mW/C`.
+                if let Some(scale) = self.temperature_word(&word) {
+                    let (degree, dim) = self.finish_unit(scale.degree(), TEMPERATURE, None);
+                    return Some(Quantity::of(degree, dim));
+                }
                 // A unit on its own, as in `m/s` or `N*m`.
                 let (scale, dim, index) = self.resolve(&word)?;
                 if dim == NO_DIM {
@@ -822,16 +926,50 @@ impl<'a> Parser<'a> {
     }
 }
 
-fn multiply(a: Quantity, b: Quantity) -> Quantity {
+/// Adds, or with `sign` of -1 subtracts.
+///
+/// A reading on a temperature scale (`25 C`) is a point, not an amount, so:
+/// a reading with a difference added or taken away is a reading; one
+/// reading less another is a difference; and two readings cannot be added.
+fn add(left: Quantity, right: Quantity, sign: f64) -> Option<Quantity> {
+    if left.dim != right.dim || left.percent != right.percent {
+        return None;
+    }
+    let value = left.value + sign * right.value;
+    match (left.reading, right.reading) {
+        (None, None) | (Some(_), None) => Some(Quantity { value, ..left }),
+        // A difference with a reading added to it. Taking a reading away
+        // from a difference means nothing.
+        (None, Some(_)) => (sign > 0.0).then_some(Quantity { value, ..right }),
+        (Some(a), Some(b)) => (sign < 0.0).then(|| {
+            let apart = if a == b {
+                value
+            } else {
+                // Through kelvin, as the two are on different scales, with
+                // the noise from adding each scale's zero rounded off.
+                let apart = left.kelvin().unwrap_or(0.0) - right.kelvin().unwrap_or(0.0);
+                (apart * 1e9).round() / 1e9
+            };
+            Quantity::of(apart, TEMPERATURE)
+        }),
+    }
+}
+
+/// A reading on a temperature scale cannot be multiplied, divided, raised
+/// to a power or put through a function: twice 25 °C is not 50 °C.
+fn multiply(a: Quantity, b: Quantity) -> Option<Quantity> {
+    if a.reading.is_some() || b.reading.is_some() {
+        return None;
+    }
     let mut dim = a.dim;
     for (d, other) in dim.iter_mut().zip(b.dim) {
         *d += other;
     }
-    Quantity::of(a.value * b.value, dim)
+    Some(Quantity::of(a.value * b.value, dim))
 }
 
 fn divide(a: Quantity, b: Quantity) -> Option<Quantity> {
-    if b.value == 0.0 {
+    if b.value == 0.0 || a.reading.is_some() || b.reading.is_some() {
         return None;
     }
     let mut dim = a.dim;
@@ -844,7 +982,7 @@ fn divide(a: Quantity, b: Quantity) -> Option<Quantity> {
 /// The exponent must be a plain number. A quantity with units can only be
 /// raised to a power that leaves whole-number dimensions (`V^2`, `√(H·F)`).
 fn raise(base: Quantity, exponent: Quantity) -> Option<Quantity> {
-    if exponent.dim != NO_DIM {
+    if exponent.dim != NO_DIM || base.reading.is_some() {
         return None;
     }
     let mut dim = NO_DIM;
@@ -866,6 +1004,9 @@ fn is_function(name: &str) -> bool {
 }
 
 fn apply(name: &str, argument: Quantity) -> Option<Quantity> {
+    if argument.reading.is_some() {
+        return None;
+    }
     match name {
         "sqrt" => return raise(argument, Quantity::plain(0.5)),
         "abs" => return Some(Quantity::of(argument.value.abs(), argument.dim)),
@@ -969,11 +1110,49 @@ fn conversion_split(tokens: &[Token]) -> Option<usize> {
 
 // ---- temperature ------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Scale {
     Celsius,
     Fahrenheit,
     Kelvin,
+}
+
+impl Scale {
+    /// Kelvin in one degree of this scale.
+    fn degree(self) -> f64 {
+        match self {
+            Scale::Fahrenheit => 5.0 / 9.0,
+            Scale::Celsius | Scale::Kelvin => 1.0,
+        }
+    }
+
+    /// The scale's zero, in kelvin.
+    fn zero(self) -> f64 {
+        match self {
+            Scale::Celsius => 273.15,
+            Scale::Fahrenheit => 459.67 * 5.0 / 9.0,
+            Scale::Kelvin => 0.0,
+        }
+    }
+
+    fn symbol(self) -> &'static str {
+        match self {
+            Scale::Celsius => "°C",
+            Scale::Fahrenheit => "°F",
+            Scale::Kelvin => "K",
+        }
+    }
+
+    /// How a difference is labelled. Kelvin is the unit of difference
+    /// already. The other two are marked, so that a difference of 60 °C is
+    /// not taken for a temperature of 60 °C.
+    fn difference(self) -> &'static str {
+        match self {
+            Scale::Celsius => "Δ°C",
+            Scale::Fahrenheit => "Δ°F",
+            Scale::Kelvin => "K",
+        }
+    }
 }
 
 fn temperature_scale(word: &str) -> Option<Scale> {
@@ -1017,6 +1196,207 @@ fn temperature(tokens: &[Token]) -> Option<(Answer, f64)> {
     // Round off the noise from adding and removing 273.15.
     let converted = (converted * 1e9).round() / 1e9;
     Some((shown_as_is(converted, label), kelvin))
+}
+
+// ---- decibels ---------------------------------------------------------------
+//
+// Decibels are logarithmic, so they are read as whole patterns and never
+// mixed into ordinary sums:
+// - a level, with gains added or taken away: `10 dBm + 3 dB`, `+4 dBu in V`;
+// - a value as a level: `250 mW in dBm`;
+// - one quantity over another of the same kind: `2 V / 1 V to dB`.
+//
+// A plain number has no decibel value of its own, because it could be a
+// ratio of powers (10·log) or of voltages (20·log). `47 in dB` is refused.
+
+/// A level: decibels above a fixed reference, such as dBm (1 mW).
+struct Level {
+    /// The spelling shown in answers.
+    name: &'static str,
+    reference: f64,
+    dim: Dim,
+    /// The unit the reference is in.
+    unit: &'static str,
+}
+
+static LEVELS: &[Level] = &[
+    Level { name: "dBm", reference: 1e-3, dim: POWER, unit: "W" },
+    Level { name: "dBW", reference: 1.0, dim: POWER, unit: "W" },
+    Level { name: "dBV", reference: 1.0, dim: VOLTAGE, unit: "V" },
+    // 0 dBu is the voltage that puts 1 mW into 600 Ω: √0.6 V.
+    Level { name: "dBu", reference: 0.774_596_669_241_483_4, dim: VOLTAGE, unit: "V" },
+];
+
+/// Accepts the usual spelling and all lower case (`dbm`). `dBv` with a
+/// small v alone is an old name for dBu, so it is not accepted as either.
+fn level(word: &str) -> Option<&'static Level> {
+    LEVELS.iter().find(|level| level.name == word || level.name.to_lowercase() == word)
+}
+
+fn is_gain(word: &str) -> bool {
+    word == "dB" || word == "db"
+}
+
+/// Decibels for each factor of ten: 10 for power, 20 for voltage and
+/// current. Nothing else has an agreed meaning in decibels here.
+fn decibels_per_decade(dim: Dim) -> Option<f64> {
+    if dim == POWER {
+        Some(10.0)
+    } else if dim == VOLTAGE || dim == CURRENT {
+        Some(20.0)
+    } else {
+        None
+    }
+}
+
+/// Rounds off the noise a logarithm leaves, so that 30 dBm is 0 dBW.
+fn tidy(decibels: f64) -> f64 {
+    (decibels * 1e9).round() / 1e9
+}
+
+/// The second value is the number of decibels when the answer is in
+/// decibels, and SI base units otherwise.
+fn decibels(tokens: &[Token], labelled: bool) -> Option<(Answer, f64)> {
+    level_sum(tokens).or_else(|| as_decibels(tokens, labelled))
+}
+
+/// `[±] number level { ± number dB } [to unit]`
+fn level_sum(tokens: &[Token]) -> Option<(Answer, f64)> {
+    let word = |pos: usize| match tokens.get(pos) {
+        Some(Token::Word(word)) => Some(word.as_str()),
+        _ => None,
+    };
+    let number = |pos: &mut usize, sign_needed: bool| -> Option<f64> {
+        let sign = match tokens.get(*pos) {
+            Some(Token::Plus) => 1.0,
+            Some(Token::Minus) => -1.0,
+            _ if sign_needed => return None,
+            _ => 0.0,
+        };
+        if sign != 0.0 {
+            *pos += 1;
+        }
+        let Some(&Token::Number(value)) = tokens.get(*pos) else { return None };
+        *pos += 1;
+        Some(if sign < 0.0 { -value } else { value })
+    };
+
+    let mut pos = 0;
+    let mut decibels = number(&mut pos, false)?;
+    let from = level(word(pos)?)?;
+    pos += 1;
+    let mut gains = false;
+    while matches!(tokens.get(pos), Some(Token::Plus | Token::Minus)) {
+        let gain = number(&mut pos, true)?;
+        if !is_gain(word(pos)?) {
+            return None;
+        }
+        pos += 1;
+        decibels += gain;
+        gains = true;
+    }
+    let decibels = tidy(decibels);
+    let per_decade = decibels_per_decade(from.dim)?;
+    let linear = from.reference * 10f64.powf(decibels / per_decade);
+    if !linear.is_normal() {
+        return None;
+    }
+
+    if pos == tokens.len() {
+        // A level alone is answered with what it stands for: 10 dBm is
+        // 10 mW. Once gains are applied the answer stays a level.
+        return Some(if gains {
+            (shown_as_is(decibels, from.name), decibels)
+        } else {
+            (shown_with_prefix(linear, from.unit), linear)
+        });
+    }
+    if !matches!(word(pos), Some("to" | "in")) {
+        return None;
+    }
+    let target = &tokens[pos + 1..];
+    if let [Token::Word(unit)] = target
+        && let Some(to) = level(unit)
+    {
+        // Power and voltage levels are only related through an impedance,
+        // which was not given.
+        if to.dim != from.dim {
+            return None;
+        }
+        let converted = tidy(per_decade * (linear / to.reference).log10());
+        return Some((shown_as_is(converted, to.name), converted));
+    }
+    let target = parse_target(target)?;
+    (target.dim == from.dim).then(|| (shown_as_is(linear / target.factor, &target.label), linear))
+}
+
+/// `value to level` and `quantity / quantity to dB`.
+fn as_decibels(tokens: &[Token], labelled: bool) -> Option<(Answer, f64)> {
+    let [expression @ .., Token::Word(keyword), Token::Word(unit)] = tokens else { return None };
+    if keyword != "to" && keyword != "in" {
+        return None;
+    }
+    let positive = |tokens: &[Token]| {
+        reading(tokens, None, labelled).map(|outcome| outcome.quantity).filter(|q| q.value > 0.0)
+    };
+
+    if let Some(to) = level(unit) {
+        let value = positive(expression)?;
+        if value.dim != to.dim {
+            return None;
+        }
+        let decibels = tidy(decibels_per_decade(to.dim)? * (value.value / to.reference).log10());
+        return Some((shown_as_is(decibels, to.name), decibels));
+    }
+    if !is_gain(unit) {
+        return None;
+    }
+    let slash = ratio_split(expression)?;
+    let above = positive(&expression[..slash])?;
+    let below = positive(&expression[slash + 1..])?;
+    if above.dim != below.dim {
+        return None;
+    }
+    let decibels = tidy(decibels_per_decade(above.dim)? * (above.value / below.value).log10());
+    Some((shown_as_is(decibels, "dB"), decibels))
+}
+
+/// Where `tokens` divide into one quantity over another, if that is all
+/// they are: a single division outside any brackets, with nothing after it
+/// that the usual order of working would attach to the result instead.
+fn ratio_split(tokens: &[Token]) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut slash = None;
+    for (i, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Open => depth += 1,
+            Token::Close => depth = depth.checked_sub(1)?,
+            _ if depth > 0 => {}
+            Token::Slash if slash.is_none() => slash = Some(i),
+            Token::Slash | Token::Plus | Token::Minus | Token::Parallel => return None,
+            Token::Star if slash.is_some() => return None,
+            _ => {}
+        }
+    }
+    let slash = slash?;
+    // What is under the line must be one thing: a value with its unit, or
+    // one pair of brackets.
+    let simple = match &tokens[slash + 1..] {
+        [Token::Number(_), Token::Word(_)] | [Token::Number(_), Token::Word(_), Token::Super(_)] => true,
+        [Token::Open, inside @ .., Token::Close] => {
+            let mut depth = 0i32;
+            inside.iter().all(|token| {
+                match token {
+                    Token::Open => depth += 1,
+                    Token::Close => depth -= 1,
+                    _ => {}
+                }
+                depth >= 0
+            })
+        }
+        _ => false,
+    };
+    simple.then_some(slash)
 }
 
 // ---- formatting -------------------------------------------------------------
@@ -1182,36 +1562,63 @@ struct Outcome {
     electrical: bool,
     mechanical: bool,
     bare_prefix: bool,
+    /// A Celsius or Fahrenheit word was typed.
+    scale_typed: bool,
+    /// A lone `K` came straight before a `/` and a unit.
+    k_rate: bool,
 }
 
+/// `kelvin` reads a lone `K` as kelvin, not as the prefix kilo.
 fn attempt(
     tokens: &[Token],
     split: Option<usize>,
     bare_m: BareM,
+    kelvin: bool,
     names: &[(String, Quantity)],
 ) -> Option<Outcome> {
     // Typed input must be worth answering: more than a bare number. A step
     // of a program may be as simple as `200` or another step's name.
     let in_program = bare_m == BareM::Program;
-    let (expression, target) = match split {
-        Some(at) => (&tokens[..at], Some(parse_target(&tokens[at + 1..])?)),
+    let (expression, wanted) = match split {
+        Some(at) => (&tokens[..at], Some(&tokens[at + 1..])),
         None => (tokens, None),
     };
 
     let mut parser = Parser::new(expression, bare_m, names);
+    parser.kelvin = kelvin;
     let result = parser.sum()?;
     if parser.pos != expression.len() || !parser.has_value || !result.value.is_finite() {
         return None;
     }
-    if !in_program && !parser.interesting && target.is_none() {
+    if !in_program && !parser.interesting && wanted.is_none() {
         return None;
     }
 
-    let answer = if let Some(target) = &target {
+    // A temperature is converted to a scale, not to a unit: `to F` after
+    // a temperature is Fahrenheit, though `F` is otherwise the farad.
+    let to_scale = match wanted {
+        Some([Token::Word(word)]) if result.dim == TEMPERATURE => temperature_scale(word),
+        _ => None,
+    };
+    let target = match wanted {
+        Some(unit) if to_scale.is_none() => Some(parse_target(unit)?),
+        _ => None,
+    };
+    let scale_typed = parser.celsius || parser.fahrenheit;
+
+    let answer = if result.dim == TEMPERATURE && target.is_none() {
+        shown_temperature(result, to_scale, parser.typed_scale(), scale_typed)?
+    } else if result.reading.is_some() {
+        return None;
+    } else if let Some(target) = &target {
         if result.dim != target.dim {
             return None;
         }
         shown_as_is(result.value / target.factor, &target.label)
+    } else if result.dim == THERMAL_RESISTANCE {
+        // In the scale typed, as a datasheet gives it: °C/W.
+        let scale = parser.typed_scale().unwrap_or(Scale::Kelvin);
+        shown_as_is(result.value / scale.degree(), &format!("{}/W", scale.symbol()))
     } else {
         // If the result is in the same kind of unit the user typed, and that
         // unit does not take prefixes, answer in it: `3 bar * 2` is 6 bar.
@@ -1242,12 +1649,46 @@ fn attempt(
 
     Some(Outcome {
         answer,
-        quantity: result,
+        // A reading is handed on as an absolute temperature, in kelvin.
+        quantity: Quantity { value: result.kelvin().unwrap_or(result.value), ..result },
         saw_bare_m: parser.saw_bare_m,
         bare_prefix: parser.bare_prefix,
         electrical: parser.electrical || target.as_ref().is_some_and(|t| t.electrical),
         mechanical: parser.mechanical || target.as_ref().is_some_and(|t| t.mechanical),
+        scale_typed,
+        k_rate: parser.k_rate,
     })
+}
+
+/// A result that is a temperature: a reading on a scale, or a difference.
+///
+/// `to` is the scale asked for, `typed` the one scale the user typed if
+/// there was only one, and `scale_typed` whether they typed any.
+fn shown_temperature(
+    result: Quantity,
+    to: Option<Scale>,
+    typed: Option<Scale>,
+    scale_typed: bool,
+) -> Option<Answer> {
+    if let Some(kelvin) = result.kelvin() {
+        // Nothing is colder than absolute zero.
+        if kelvin < -1e-9 {
+            return None;
+        }
+        let scale = to.or(result.reading)?;
+        let reading = (kelvin - scale.zero()) / scale.degree();
+        // Round off the noise from adding and removing the scale's zero.
+        return Some(shown_as_is((reading * 1e9).round() / 1e9, scale.symbol()));
+    }
+    let scale = match to {
+        Some(Scale::Kelvin) => Scale::Kelvin,
+        // A number of kelvin alone may be a temperature or a difference,
+        // and the two convert differently. Only where a Celsius or
+        // Fahrenheit temperature was typed is it known to be a difference.
+        Some(scale) => scale_typed.then_some(scale)?,
+        None => typed.unwrap_or(Scale::Kelvin),
+    };
+    Some(shown_as_is(result.value / scale.degree(), scale.difference()))
 }
 
 /// Whether `text` is a name the user has put in front of a sum, as in
@@ -1293,23 +1734,46 @@ pub fn evaluate_with_value(input: &str) -> Option<(Answer, f64)> {
     if let Some(found) = temperature(&tokens) {
         return Some(found);
     }
+    if let Some(found) = decibels(&tokens, labelled) {
+        return Some(found);
+    }
     let split = conversion_split(&tokens);
+    reading(&tokens, split, labelled).map(|outcome| (outcome.answer, outcome.quantity.value))
+}
+
+/// Works out typed input, or a part of it, as ordinary maths. `split` is
+/// where a conversion's `to` is, if there is one.
+fn reading(tokens: &[Token], split: Option<usize>, labelled: bool) -> Option<Outcome> {
+    // A lone `K` is the prefix kilo (`4.7K`) or kelvin (`25 C + 10 K`).
+    // Kilo is tried first, so everything that worked before still does.
+    let kilo = reading_with(tokens, split, labelled, false);
+    if !tokens.iter().any(|token| matches!(token, Token::Word(word) if word == "K")) {
+        return kilo;
+    }
+    let kelvin = reading_with(tokens, split, labelled, true);
+    match (kilo, kelvin) {
+        // Both readings work. It is kelvin beside a Celsius or Fahrenheit
+        // temperature, and where it is written as a rate (`40 K/W`).
+        (Some(kilo), Some(kelvin)) => Some(if kelvin.scale_typed || kilo.k_rate { kelvin } else { kilo }),
+        (kilo, kelvin) => kilo.or(kelvin),
+    }
+}
+
+fn reading_with(tokens: &[Token], split: Option<usize>, labelled: bool, kelvin: bool) -> Option<Outcome> {
     // Someone who names the answer is working with real quantities. A value
     // with a prefix and no unit (`V = 2.2mA * 4.7k`) then has a unit they
     // left out, and reading it as a plain number would give the answer the
     // wrong unit (amps, there). That needs understanding, so it is refused.
-    let done = |outcome: Outcome| {
-        (!(labelled && outcome.bare_prefix)).then_some((outcome.answer, outcome.quantity.value))
-    };
+    let done = |outcome: Outcome| (!(labelled && outcome.bare_prefix)).then_some(outcome);
 
     // A lone `m` after a number is milli in electrical shorthand (`2.2m`)
     // and metres in mechanical work (`5 m`). Try both readings.
-    let milli = attempt(&tokens, split, BareM::Milli, &[]);
+    let milli = attempt(tokens, split, BareM::Milli, kelvin, &[]);
     let saw_bare_m = milli.as_ref().is_none_or(|outcome| outcome.saw_bare_m);
     if !saw_bare_m {
         return milli.and_then(done);
     }
-    let metre = attempt(&tokens, split, BareM::Metre, &[]);
+    let metre = attempt(tokens, split, BareM::Metre, kelvin, &[]);
 
     match (milli, metre) {
         (Some(only), None) | (None, Some(only)) => done(only),
@@ -1381,7 +1845,7 @@ fn evaluate_step(text: &str, to: Option<&str>, names: &Names) -> Option<Outcome>
         tokens.extend(lex(unit, &[])?);
     }
     let split = conversion_split(&tokens);
-    attempt(&tokens, split, BareM::Program, names)
+    attempt(&tokens, split, BareM::Program, false, names)
 }
 
 /// How far the equation is from true when the unknown has the value `x`.
@@ -1656,6 +2120,147 @@ mod tests {
     }
 
     #[test]
+    fn temperatures_and_differences() {
+        // A temperature with a rise added to it, or taken away.
+        check("25 C + 2 W * 50 C/W", "125.0 °C");
+        check("25C + 2W*50C/W", "125.0 °C");
+        check("Tj = 25 °C + 2 W * 50 °C/W", "125.0 °C");
+        check("2 W * 50 C/W + 25 C", "125.0 °C");
+        check("125 C - 2 W * 50 C/W", "25.00 °C");
+        check("25 C + 2 W * (0.5 C/W + 1.2 C/W)", "28.40 °C");
+        check("-40 C + 10 K", "−30.00 °C");
+        check("68 °F + 2 W * 9 °F/W", "86.00 °F");
+        // One temperature less another is a difference, marked as one.
+        check("85 C - 25 C", "60.00 Δ°C");
+        check("77 °F - 32 °F", "45.00 Δ°F");
+        check("25 C - 85 C", "−60.00 Δ°C");
+        check("212 °F - 100 C", "0 K");
+        check("(85 C - 25 C) * 2", "120.0 Δ°C");
+        // A rise for each watt is one quantity, whatever comes before it.
+        check("(150 C - 25 C) / 62 C/W", "2.016 W");
+        check("(150 C - 25 C) / 2 W", "62.50 °C/W");
+        check("0.5 C/W + 1.2 C/W", "1.700 °C/W");
+        check("8 mW/C * (85 C - 25 C)", "480.0 mW");
+        check("20 C/min * 3 min", "60.00 Δ°C");
+        // Asked for on another scale.
+        check("25 C + 2 W * 50 C/W to F", "257.0 °F");
+        check("25 C + 2 W * 50 C/W to K", "398.1 K");
+        check("85 C - 25 C to F", "108.0 Δ°F");
+        check("85 C - 25 C to K", "60.00 K");
+        assert_eq!(copied("25 C + 2 W * 50 C/W").as_deref(), Some("125"));
+
+        // Two temperatures cannot be added, and a temperature cannot be
+        // scaled: twice 25 °C is not 50 °C.
+        refuse("20 C + 5 C");
+        refuse("25 C * 2");
+        refuse("2 * 25 C");
+        refuse("25 C / 2");
+        refuse("sqrt(25 C)");
+        refuse("abs(-25 C)");
+        refuse("25 C || 50 C");
+        refuse("1.38e-23 J/kelvin * 27 C");
+        // A difference less a temperature means nothing.
+        refuse("5 kelvin - 25 C");
+        refuse("(85 C - 25 C) - 25 C");
+        // Colder than absolute zero.
+        refuse("-300 C + 1 kelvin");
+        // Not a temperature and something else.
+        refuse("25 C + 5");
+        refuse("25 C + 5 V");
+        refuse("25 C to K/W");
+        // `F` is the farad. Fahrenheit is written °F or degF in a sum.
+        check("100 F - 50 F", "50.00 F");
+    }
+
+    #[test]
+    fn a_lone_k_is_kilo_or_kelvin() {
+        // Kilo wherever that works, as before.
+        check("4.7K", "4.700 k");
+        check("300 K * 2", "600.0 k");
+        check("12 V / 4.7K", "2.553 mV");
+        check("300 K + 10 K", "310.0 k");
+        // Kelvin where kilo makes no sense.
+        check("25 C + 10 K", "35.00 °C");
+        check("10 K + 25 C", "35.00 °C");
+        check("25 C - 10 K", "15.00 °C");
+        check("2 W/K * 30 kelvin", "60.00 W");
+        check("60 kelvin / 2 W", "30.00 K/W");
+        // Kelvin where it is written as a rate.
+        check("2 W * 40 K/W", "80.00 K");
+        check("40 K/W * 2 W", "80.00 K");
+        check("25 C + 2 W * 40 K/W", "105.0 °C");
+        // A number of kelvin alone may be a temperature or a difference, so
+        // it is converted only as a temperature, in the direct form.
+        check("300 K to C", "26.85 °C");
+        refuse("2 W * 40 K/W to C");
+    }
+
+    #[test]
+    fn decibel_levels() {
+        // A value as a level.
+        check("250mW in dBm", "23.98 dBm");
+        check("1 W to dBm", "30.00 dBm");
+        check("2 V to dBV", "6.021 dBV");
+        check("1.228 V to dBu", "4.002 dBu");
+        // A level as a value. Alone, it is answered with what it stands for.
+        check("10 dBm", "10.00 mW");
+        check("0 dBu", "774.6 mV");
+        check("+4 dBu in V", "1.228 V");
+        check("10 dBm to mW", "10.00 mW");
+        check("P = 10 dBm to mW", "10.00 mW");
+        // One level to another of the same kind.
+        check("-10 dBV to dBu", "−7.782 dBu");
+        check("30 dBm to dBW", "0 dBW");
+        // Gains added to a level, and taken away.
+        check("10 dBm + 3 dB", "13.00 dBm");
+        check("4 dBu - 20 dB + 6 dB", "−10.00 dBu");
+        check("10 dBm - 30 dB to uW", "10.00 µW");
+        check("10dbm + 3db", "13.00 dBm");
+        assert_eq!(copied("10 dBm + 3 dB").as_deref(), Some("13"));
+
+        // Power and voltage levels are related only through an impedance.
+        refuse("10 dBm to dBV");
+        refuse("10 dBm to V");
+        refuse("5 V to dBm");
+        // Levels are not added to each other, or scaled.
+        refuse("10 dBm + 20 dBm");
+        refuse("2 * 10 dBm");
+        refuse("10 dBm + 3");
+        refuse("10 dBm * 2");
+        // No level for nothing, or for less than nothing.
+        refuse("0 W to dBm");
+        refuse("-5 W to dBm");
+        // An old name for dBu, easily taken for dBV.
+        refuse("10 dBv");
+    }
+
+    #[test]
+    fn ratios_in_decibels() {
+        check("2V / 1V to dB", "6.021 dB");
+        check("10W / 1W to dB", "10.00 dB");
+        check("100mV / 2V in dB", "−26.02 dB");
+        check("20mA / 4mA to dB", "13.98 dB");
+        check("2 * 3V / (1V + 2V) to dB", "6.021 dB");
+        check("A = 2V / 1V to dB", "6.021 dB");
+
+        // A plain ratio could be of powers or of voltages.
+        refuse("47 in dB");
+        refuse("2 to dB");
+        refuse("2/1 to dB");
+        // Decibels alone are not a quantity, and gains are not summed here.
+        refuse("6 dB");
+        refuse("20 dB + 6 dB");
+        // Unlike things, and things decibels have no agreed meaning for.
+        refuse("2V / 1A to dB");
+        refuse("2 ohm / 1 ohm to dB");
+        // Anything the usual order of working would attach to the ratio.
+        refuse("2V / 1V * 3 to dB");
+        refuse("2V / 1V + 1 to dB");
+        refuse("2V / 1V / 1V to dB");
+        refuse("2V / 1V (3) to dB");
+    }
+
+    #[test]
     fn mechanical_units() {
         check("6 bar * pi * (25mm)^2", "1.178 kN");
         check("5 kg * 9.81 m/s^2", "49.05 N");
@@ -1824,6 +2429,17 @@ mod tests {
         // Volts plus amps and an unknown name are refused.
         assert_eq!(fail(&[expression("V_a", "9V"), expression("V_b", "V_a + 3mA")]).step, 1);
         assert_eq!(fail(&[expression("V_b", "V_missing * 2")]).step, 0);
+    }
+
+    #[test]
+    fn programs_have_no_temperatures_or_decibels() {
+        // These are for typed input. The language Claude writes its
+        // formulas in is as it was, and so are its instructions.
+        assert!(run(&[expression("T_j", "25 C + 10 kelvin")]).is_err());
+        assert!(run(&[expression("T_j", "25 degC")]).is_err());
+        assert!(run(&[expression("R_th", "50 kelvin / 2 W")]).is_err());
+        assert!(run(&[expression("P_o", "10 dBm")]).is_err());
+        assert!(run(&[expression("P_o", "10 dBm + 3 dB")]).is_err());
     }
 
     #[test]
