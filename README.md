@@ -2,9 +2,15 @@
 
 A small engineering calculator for Windows that stays on top of your other
 windows. It answers arithmetic, units and conversions as you type, and can
-hand harder problems to Claude if you want it to.
+hand harder problems to Claude if you want it to: typed in words, or pasted
+as pictures (a formula, a datasheet row, a small schematic), up to four at
+a time.
 
 <img src="docs/instant.png" width="444" alt="The Slipstick bar showing 1/(2*pi*4.7kohm*100nF) answered as 338.6 Hz">
+
+**[Download the latest installer](https://github.com/pawedfox/slipstick/releases/latest)**
+for Windows 11. It is not signed yet, so read [Install](#install) for what
+Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
@@ -18,7 +24,7 @@ Press **Ctrl+Alt+C** anywhere. A small bar appears at the bottom-right of
 the screen with the cursor in it. Type, read the answer, carry on working;
 the answer stays visible. **Esc** hides it.
 
-### Plain maths, as you type
+### Plain math, as you type
 
 No account and no network. The answer changes with every key.
 
@@ -84,7 +90,7 @@ copy the plain number. The up and down arrows recall earlier inputs.
 
 ### Harder problems, with Claude (optional)
 
-Press **Enter** on something that is not plain maths:
+Press **Enter** on something that is not plain math:
 
 <img src="docs/steps.png" width="444" alt="A loaded voltage divider described in words, answered as 2.512 V, with the formula used under the answer and the two steps of working shown above it">
 
@@ -166,13 +172,13 @@ Open with the gear, **Ctrl+,** or the tray menu.
 
 ## Privacy
 
-- **Plain maths never leaves your PC.**
+- **Plain math never leaves your PC.**
 - **A problem you send to Claude does leave it.** The text, and any
   pictures you pasted with it, go to Anthropic through Claude Code, and are
   handled under the terms of your Claude account. A problem is sent only
   when you press Enter on it, and never before you have agreed to connect
   Claude. Once connected, Claude Code is started in the background while
-  you type something that is not plain maths, so that it is ready; what you
+  you type something that is not plain math, so that it is ready; what you
   are typing is not passed to it until you press Enter.
 - **The app keeps almost nothing.** It writes one small settings file (the
   window position, your settings, and whether Claude is connected) and a
