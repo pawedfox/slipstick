@@ -18,10 +18,12 @@ revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
-becomes a last resort. Its first slice is built in 0.12.0 (2026-11-23,
-not yet released): on Enter, the app says why it refused an input, where
-it knows for certain (see "Saying why" under "Instant path").
-Next: the second slice, values after a formula.
+becomes a last resort. Its first two slices are built (2026-11-23), and
+neither is released yet. 0.12.0, which was never tagged: on Enter, the app
+says why it refused an input, where it knows for certain (see "Saying
+why" under "Instant path"). 0.13.0: a formula with its values after it is
+answered as you type (see "Values after a formula").
+Next: the third slice, solving for an unknown.
 
 ## Purpose
 
@@ -77,7 +79,8 @@ Unofficial project. Not affiliated with or endorsed by Anthropic.
 3. For anything else, press Enter to ask Claude (text, or a pasted
    screenshot). If it was plain maths that the engine refused, and the
    engine knows why, Enter says why first, and Enter again asks Claude
-   (from 0.12.0).
+   (from 0.12.0). A formula with its values after it is answered as
+   typed, and Enter then has Claude check it (from 0.13.0).
 4. The answer appears large, in engineering notation with units.
 5. Click back into other work. The window stays on top with the answer visible.
 6. Esc hides it to the tray.
@@ -704,8 +707,117 @@ Rules:
 - `gal` is the US gallon and `hp` is mechanical horsepower (745.7 W);
   metric horsepower is `PS`.
 
-Not in the instant path: variables, the decimal comma, and a plain ratio
-in decibels. Those go to Claude.
+Not in the instant path: values that last from one input to the next, the
+decimal comma, and a plain ratio in decibels. Those go to Claude.
+
+### Values after a formula (0.13.0)
+
+The second slice of "Hardening the engine": a formula as it would be
+written on paper, with the values it uses listed after it.
+
+| Input | Answer |
+|---|---|
+| `re = 25mV / Ic, Ic = 2mA` | 12.50 Ω |
+| `gain = Rd * gm, Rd = 10kohm, gm = 2.1mS` | 21.00 |
+| `F = m * a, m = 5 kg, a = 9.81 m/s^2` | 49.05 N |
+| `E = 0.5 * C * V^2, C = 100uF, V = 12V` | 7.200 mJ |
+| `Id = 0.5 * k * (Vgs - Vth)^2, k = 2 mA/V^2, Vgs = 2.5V, Vth = 1V` | 2.250 mA |
+| `Ic = beta * Ib, Ib = Vth / Rth, Vth = 1V, Rth = 20kohm, beta = 200` | 10.00 mA |
+| `T = Ta + P * Rth, Ta = 25 C, P = 2 W, Rth = 50 C/W` | 125.0 °C |
+| `Z = R + 1/(j*w*C), R = 10kohm, C = 100nF, w = 2*pi*1kHz` | 10.13 kΩ ∠ −9.043° |
+| `P = V^2 / R to mW, V = 5V, R = 1kohm` | 25.00 mW |
+
+The rules (`given` in `calc.rs`):
+
+- **The form.** What comes before the first comma is the formula, with or
+  without a name in front, and with or without `to` and a unit. Every
+  part after it is a name, an `=` and a value. If any part is not, the
+  input is not of this form and is read as it always was. A comma had no
+  meaning before, so nothing that was answered has changed.
+- **A name** is letters, digits and underscores, starting with a letter.
+  It may not be a function, a constant (`pi`, `e`, `j`), `x`, `to` or
+  `in`.
+- **A value may use other values,** given in any order. Values that
+  depend on one another in a ring are refused. A value is used, not
+  shown, so it may be something the window could not show by itself: a
+  bare number (`beta = 200`), or a unit with no name (`2 mA/V^2`).
+- **A name may be the letter of a unit or a prefix** (`V`, `C`, `m`, `k`,
+  `L`), as formulas are written. Standing alone, a word that was given a
+  value is that value. Straight after a number a word is always a unit,
+  as it is everywhere: `12V` in `V = 12V` is twelve volts, and
+  `9.81 m/s^2` is in metres even where a value is called `m`. So `2V` is
+  two volts and never twice V; that is written `2*V`.
+- **One place is in doubt, and is refused:** in the run of units behind a
+  number, a `/` or `*` and then a name that is also a unit. In `100 N/m`
+  with a value called `m`, the `m` could be metres or that value.
+- **A prefix with no unit is refused,** as it is for any named answer
+  (`Rd = 10k`). The evaluator may not guess that an `R` is in ohms, so
+  the reference problem `gain = Rd * gm, Rd = 10k, gm = 2.1mS` is given
+  the reason and needs `10kohm`.
+- **Every name the formula uses must be given a value, once, and every
+  value given must be used.** An unused value means the formula is not
+  the one meant: in `Vpp = 2V, V = 5V` the `V` is never used.
+- **The units of the values decide how the answer is shown,** as they
+  would if the values were typed into the formula: millijoules or newton
+  metres, hertz or per second, the temperature scale, bar.
+- **It works out the formula as typed, right or wrong.**
+  `P = V / R, V = 12V, R = 8ohm` is 1.500 A.
+
+**Enter on such an answer** (decided with the user 2026-11-23). Until
+this slice these inputs went to Claude, which flags a formula that is
+definitely wrong. Answered instantly, they would never reach it. So:
+
+- With Claude connected, Enter on an instant answer to a formula with its
+  values sends it to Claude, and Claude's answer, with any flag, takes its
+  place.
+- Without Claude connected, Enter does nothing and the answer stays.
+- Every other instant answer is as before: Enter does nothing.
+- The engine marks such an answer (`given` on `Answer`), and the window
+  goes by that.
+
+Two of the reference set's four "must flag" problems are now answered
+instantly (`P = V / R, …` and the JFET formula with its square missing),
+each with the number that what was typed gives, and are flagged only on
+Enter.
+
+The reasons this adds to "Saying why":
+
+| Input | It says |
+|---|---|
+| `re = 25mV / Ic, Ib = 2mA` | Ic is not given a value. |
+| `re = 25mV / Ic, Ic = 2mA, Ic = 3mA` | Ic is given a value twice. |
+| `re = 25mV / Ic, Ic = 2mA, Rc = 4.7kohm` | Rc is given a value but not used. |
+| `tau = RC, R = 1Mohm, C = 22uF` | RC is read as one name. Write it as R*C. |
+| `f = sqrt(k/m)/(2*pi), k = 100 N/m, m = 2 kg` | m could be a unit or the value you named m. Give the value another name, such as m_1. |
+| `gain = Rd * gm, Rd = 10k, gm = 2.1mS` | 10k has a prefix but no unit. |
+
+One word that nothing knows is a value that was not given. More than one
+means the input is in words (`cutoff of an RC lowpass, R = …`), which is
+for a model, and it gets no remark. The reasons for plain maths apply
+inside a formula too (`P = V + I, V = 12V, I = 2A`).
+
+Not done: a name with a tag in brackets (`VGS(off)`); `|x|` for a
+magnitude, which is `abs(x)`; values written with nothing between them
+(`2πRC`, which is given the reason above); values that last to the next
+input (slice 4); and steps for these answers (slice 7).
+
+Checked for 0.13.0 (2026-11-23): 75 unit tests, of which four groups are
+new (a formula with its values, names that are unit letters, the rules it
+is held to, and that programs are unchanged), with the expected values
+worked out by hand, and the 71 from before pass, with one expectation
+changed (`re = 25mV / Ic, Ic = 2mA` was listed as refused without a
+reason and is now answered); every reference
+problem through the instant path alone, which now answers six: the three
+from before, `re = 25mV / Ic, Ic = 2mA`, and the two "must flag" problems
+named above; every reference problem asked for a reason, of which six get
+one and the worded ones none; and the window in the built-in browser,
+where a formula answers as it is typed, Enter does nothing without Claude,
+a missing unit and values run together draw their reasons on Enter, and,
+with Claude connected, Enter on `P = V / R, V = 12V, R = 8 ohms` came back
+flagged ("V/R gives amps, not watts. The usual form gives 18.00 W.") while
+Enter on `12V / 8ohm` did nothing. That was one real question to Claude.
+Not checked: the real app. The instructions to Claude are unchanged, so
+the reference set was not run through a model.
 
 ### Saying why (0.12.0)
 
@@ -1570,7 +1682,10 @@ types.
    cannot be added"). Until now nothing was shown, so a slip and a limit
    looked the same. It still never guesses a number. *Built 2026-11-23,
    in 0.12.0: see "Saying why" under "Instant path".*
-2. **Values after a formula:** `gain = Rd * gm, Rd = 10k, gm = 2.1mS`.
+2. **Values after a formula:** `gain = Rd * gm, Rd = 10kohm, gm = 2.1mS`.
+   *Built 2026-11-23, in 0.13.0: see "Values after a formula" under
+   "Instant path". As first written here the example had `Rd = 10k`,
+   which is refused: a prefix needs its unit.*
 3. **Solving for an unknown:** `10 Hz = 1/(2*pi*1M*C)` gives C. The solver
    exists already, for Claude's working.
 4. **Named values that last the session:** `R1 = 10k`, then `R1` in what

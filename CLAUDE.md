@@ -17,8 +17,8 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.12.0, not yet released; 0.11.0 is the current release
-(2026-11-22). Work follows
+Version 0.13.0, not yet released; 0.11.0 is the current release
+(2026-11-22), and 0.12.0 was never tagged. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -29,10 +29,13 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   model, so that asking one is a last resort. Models that run on the
   user's own machine are dropped as an aim.
 - Item 1 of the roadmap is hardening the engine, in the slices under
-  "Hardening the engine" in `SPEC.md`. The first is built in 0.12.0: on
+  "Hardening the engine" in `SPEC.md`. Two are built. In 0.12.0, on
   Enter the app says why it refused an input, where it is certain
-  (`why_not` in `calc.rs`; "Saying why" in `SPEC.md`). Next is the second
-  slice, values after a formula. After the engine come macOS, then one small
+  (`why_not` in `calc.rs`; "Saying why" in `SPEC.md`). In 0.13.0, a
+  formula with its values after it is answered as typed (`given` in
+  `calc.rs`; "Values after a formula" in `SPEC.md`), and Enter on that
+  answer has Claude check it. Next is the third slice, solving for an
+  unknown. After the engine come macOS, then one small
   provider-neutral route, then Linux, then a formula library. What was
   found is under "Models other than Claude" and "Other operating systems"
   there.
@@ -143,6 +146,11 @@ Run from the repo root unless noted.
   wording in `Why::say`, and add a test with `why`. An input whose reason
   is not certain must stay `silent`, and nothing here may change what
   `evaluate` answers.
+  `given` reads a formula with its values after it. A word straight after
+  a number is always a unit, even where the user gave a value that name;
+  do not weaken that, and do not let the engine guess a missing unit from
+  a name (`R = 10k` is refused, not read as ohms). An answer of this kind
+  carries `given`, which is what lets Enter send it to Claude.
 - `src-tauri/src/solver.rs` — runs Claude's reply through the engine and
   produces what the window shows. `src-tauri/prompts/solver.md` is the
   instructions given to Claude; it documents the formula language, so

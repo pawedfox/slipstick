@@ -14,9 +14,10 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.12.0, not yet released (the latest release is 0.11.0,
-which does not yet say why it refused an input). It is one person's tool,
-in daily use by its author; expect rough edges. See
+Status: version 0.13.0, not yet released. The latest release is 0.11.0,
+which does not yet say why it refused an input or take a formula with its
+values after it. It is one person's tool, in daily use by its author;
+expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
@@ -51,6 +52,9 @@ No account and no network. The answer changes with every key.
 | `10kohm + 1/(j*2*pi*1kHz*100nF)` | 10.13 kΩ ∠ −9.043° |
 | `230 V @ 0° - 230 V @ 120°` | 398.4 V ∠ −30.00° |
 | `VGS = -0.3V * (1 - sqrt(0.1mA / 0.2mA))` | −87.87 mV |
+| `re = 25mV / Ic, Ic = 2mA` | 12.50 Ω |
+| `F = m * a, m = 5 kg, a = 9.81 m/s^2` | 49.05 N |
+| `E = 0.5 * C * V^2, C = 100uF, V = 12V` | 7.200 mJ |
 
 It understands:
 
@@ -84,6 +88,13 @@ It understands:
   the real and imaginary parts on a line beneath; `abs`, `arg`, `re`,
   `im` and `conj` take one apart.
 - **A name in front**, as you would write it on paper: `VGS = …`.
+- **A formula with its values after it**, separated by commas:
+  `gain = Rd * gm, Rd = 10kohm, gm = 2.1mS`. A value may use other
+  values, in any order. A name may be a unit's letter, as formulas are
+  written: alone it is your value, and straight after a number it is the
+  unit, so `V = 12V` means what it says. Give every value its unit
+  (`10kohm`, not `10k`), and write `2*V`, not `2V`. The formula is worked
+  out exactly as you typed it, right or wrong.
 
 It is strict on purpose. Anything it is not sure of gets no instant answer,
 never a guess. Press **Enter** on something it refused and, where it knows
@@ -97,6 +108,8 @@ exactly why, it says so:
 | `ln(5V)` | ln needs a plain number. Divide by a unit first. |
 | `1/2pi` | What follows the division could be above or below the line. Add brackets, as in 1/(2*pi). |
 | `V = 2.2mA * 4.7k` | 4.7k has a prefix but no unit. |
+| `re = 25mV / Ic, Ib = 2mA` | Ic is not given a value. |
+| `tau = RC, R = 1Mohm, C = 22uF` | RC is read as one name. Write it as R*C. |
 
 Click the answer, or press Ctrl+C with nothing selected, to copy the plain
 number. The up and down arrows recall earlier inputs.
@@ -121,6 +134,10 @@ reason for refusing it, press Enter again to send it all the same.)
   form side by side:
 
   <img src="docs/flagged.png" width="444" alt="P = V / R with V = 12 V and R = 8 ohm, answered as 1.500 A with a yellow note: Gives amps, not watts. The usual form gives 18.00 W.">
+
+  A formula typed with its values after it is answered at once, exactly
+  as typed, before Claude has seen it. Press Enter on that answer and,
+  with Claude connected, Claude checks it and flags it if it is wrong.
 
 - **Pictures.** Paste a screenshot of a formula, a datasheet row or a small
   schematic, up to four at once, with or without words.

@@ -152,11 +152,16 @@ pub struct Answer {
     /// `10.00 − j1.592 kΩ`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parts: Option<String>,
+    /// The input was a formula with its values after it. It is worked out
+    /// as typed, right or wrong, so the window lets Enter send it on to be
+    /// checked.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub given: bool,
 }
 
 impl Answer {
     fn real(number: String, unit: String, copy: String) -> Self {
-        Self { number, unit, copy, angle: None, parts: None }
+        Self { number, unit, copy, angle: None, parts: None, given: false }
     }
 }
 
@@ -1836,6 +1841,60 @@ struct Outcome {
     k_rate: bool,
     /// The first value typed with a prefix and no unit, as typed.
     bare_text: Option<String>,
+    /// The result as the engine holds it. `quantity` gives a temperature
+    /// in kelvin; this keeps it as a reading on its scale.
+    raw: Quantity,
+    hints: Hints,
+}
+
+/// What the units typed say about an input. It is carried from the values
+/// given after a formula to the formula itself, where it decides how the
+/// answer is shown: millijoules or newton metres, hertz or per second,
+/// °C or °F.
+#[derive(Clone, Default)]
+struct Hints {
+    electrical: bool,
+    mechanical: bool,
+    joules: bool,
+    saw_pi: bool,
+    celsius: bool,
+    fahrenheit: bool,
+    typed: Vec<(usize, i32)>,
+}
+
+impl Hints {
+    fn of(parser: &Parser) -> Self {
+        Self {
+            electrical: parser.electrical,
+            mechanical: parser.mechanical,
+            joules: parser.joules,
+            saw_pi: parser.saw_pi,
+            celsius: parser.celsius,
+            fahrenheit: parser.fahrenheit,
+            typed: parser.typed.clone(),
+        }
+    }
+
+    fn add(&mut self, other: &Hints) {
+        self.electrical |= other.electrical;
+        self.mechanical |= other.mechanical;
+        self.joules |= other.joules;
+        self.saw_pi |= other.saw_pi;
+        self.celsius |= other.celsius;
+        self.fahrenheit |= other.fahrenheit;
+        self.typed.extend(&other.typed);
+    }
+}
+
+/// How one part of typed input is read.
+struct Part<'a> {
+    /// The named values it may use.
+    names: &'a [(String, Quantity)],
+    hints: &'a Hints,
+    /// The part is a value given a name. It is used, not shown, so it need
+    /// not be something the window could show: it may be a bare number, or
+    /// have a unit with no name of its own (`2 mA/V^2`).
+    value_only: bool,
 }
 
 // ---- why an input was refused -----------------------------------------------
@@ -1894,6 +1953,18 @@ enum Why {
     LoneM,
     /// `47 in dB`: power or voltage?
     BareDecibel,
+    /// In a formula with its values after it: a name the formula uses
+    /// that was given no value.
+    NotGiven(String),
+    /// A value that was given and is used nowhere.
+    NotUsed(String),
+    GivenTwice(String),
+    /// A word that could be a unit or a value the user named: the `m` of
+    /// `100 N/m` where a value is called `m`.
+    UnitOrName(String),
+    /// Values written with nothing between them: `RC`. With it, how to
+    /// write them.
+    RunTogether(String, String),
 }
 
 /// What a quantity with these dimensions is called, with its article.
@@ -1991,6 +2062,13 @@ impl Why {
                 "A plain number in dB could be a power or a voltage ratio. Give both sides units, as in 2V / 1V to dB."
                     .into()
             }
+            Why::NotGiven(name) => format!("{name} is not given a value."),
+            Why::NotUsed(name) => format!("{name} is given a value but not used."),
+            Why::GivenTwice(name) => format!("{name} is given a value twice."),
+            Why::RunTogether(word, apart) => format!("{word} is read as one name. Write it as {apart}."),
+            Why::UnitOrName(name) => format!(
+                "{name} could be a unit or the value you named {name}. Give the value another name, such as {name}_1."
+            ),
         }
     }
 }
@@ -2058,19 +2136,25 @@ fn bare_decibel(tokens: &[Token], labelled: bool) -> bool {
 }
 
 /// Why one reading of a lone `K` was refused. Follows `reading_with`.
-fn why_reading(tokens: &[Token], split: Option<usize>, labelled: bool, kelvin: bool) -> Option<Why> {
+fn why_reading(
+    tokens: &[Token],
+    split: Option<usize>,
+    labelled: bool,
+    kelvin: bool,
+    part: &Part,
+) -> Option<Why> {
     let no_unit = |outcome: Outcome| {
         (labelled && outcome.bare_prefix).then(|| Why::NoUnit(outcome.bare_text.unwrap_or_default()))
     };
 
     let mut why_milli = None;
-    let milli = attempt_noting(tokens, split, BareM::Milli, kelvin, &[], &mut why_milli);
+    let milli = attempt_noting(tokens, split, BareM::Milli, kelvin, part, &mut why_milli);
     let saw_bare_m = milli.as_ref().is_none_or(|outcome| outcome.saw_bare_m);
     if !saw_bare_m {
         return milli.and_then(no_unit);
     }
     let mut why_metre = None;
-    let metre = attempt_noting(tokens, split, BareM::Metre, kelvin, &[], &mut why_metre);
+    let metre = attempt_noting(tokens, split, BareM::Metre, kelvin, part, &mut why_metre);
 
     match (milli, metre) {
         (Some(only), None) | (None, Some(only)) => no_unit(only),
@@ -2092,6 +2176,9 @@ pub fn why_not(input: &str) -> Option<String> {
     if text.is_empty() || text.chars().count() > 400 || evaluate(input).is_some() {
         return None;
     }
+    if let Some(result) = given(text) {
+        return result.err().flatten().map(|why| why.say());
+    }
     let (labelled, text) = without_label(text);
     let tokens = lex(text, &[])?;
     if tokens.is_empty() || !all_maths(&tokens) {
@@ -2100,15 +2187,250 @@ pub fn why_not(input: &str) -> Option<String> {
     if bare_decibel(&tokens, labelled) {
         return Some(Why::BareDecibel.say());
     }
-    let split = conversion_split(&tokens);
-    let kilo = why_reading(&tokens, split, labelled, false)?;
+    let part = Part { names: &[], hints: &Hints::default(), value_only: false };
+    why_refused(&tokens, conversion_split(&tokens), labelled, &part).map(|why| why.say())
+}
+
+/// Why every reading of these tokens was refused, if they all agree.
+/// Follows `reading_named`.
+fn why_refused(tokens: &[Token], split: Option<usize>, labelled: bool, part: &Part) -> Option<Why> {
+    let kilo = why_reading(tokens, split, labelled, false, part)?;
     // A lone `K` is read as kilo and as kelvin. Both must agree.
     if tokens.iter().any(|token| matches!(token, Token::Word(word) if word == "K"))
-        && why_reading(&tokens, split, labelled, true).as_ref() != Some(&kilo)
+        && why_reading(tokens, split, labelled, true, part).as_ref() != Some(&kilo)
     {
         return None;
     }
-    Some(kilo.say())
+    Some(kilo)
+}
+
+// ---- values after a formula -------------------------------------------------
+//
+// `gain = Rd * gm, Rd = 10kohm, gm = 2.1mS`: a formula as it would be
+// written on paper, with the values it uses listed after it. This is the
+// form Claude writes its working in, typed by the user.
+//
+// A word standing alone that the user has given a value to is that value,
+// even where it is also a unit: `V` in `P = V / R, V = 12V, R = 8ohm`.
+// Straight after a number a word is always a unit, as everywhere else, so
+// `12V` is twelve volts. Where a word could be read both ways, the input is
+// refused (`unit_or_name`).
+
+/// Splits typed input at its commas into a formula and the values given
+/// after it. Returns nothing unless every part after the first is a name,
+/// an `=` and something, in which case the input is not of this form.
+fn split_given(text: &str) -> Option<(&str, Vec<(&str, &str)>)> {
+    let mut parts = Vec::new();
+    let (mut depth, mut start) = (0i32, 0);
+    for (at, c) in text.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&text[start..at]);
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&text[start..]);
+
+    let (formula, rest) = parts.split_first()?;
+    if rest.is_empty() || formula.trim().is_empty() {
+        return None;
+    }
+    let mut values = Vec::new();
+    for part in rest {
+        let (name, value) = part.split_once('=')?;
+        let (name, value) = (name.trim(), value.trim());
+        let chars: Vec<char> = name.chars().collect();
+        if identifier_end(&chars, 0) != Some(chars.len()) || value.is_empty() || value.contains('=') {
+            return None;
+        }
+        values.push((name, value));
+    }
+    Some((formula.trim(), values))
+}
+
+/// Whether a word is a unit, a prefix or a temperature scale.
+fn is_unit_word(word: &str) -> bool {
+    lookup(word).is_some() || temperature_scale(word).is_some()
+}
+
+/// A word that could be read as a unit or as a value the user named.
+///
+/// Straight after a number a word is always a unit, so `9.81 m` is metres
+/// even where a value is called `m`. The doubt is in the run of units that
+/// follows: a `/` or `*` and then a name that is also a unit. In
+/// `100 N/m` with a value named `m`, the `m` could be metres or that
+/// value.
+fn unit_or_name(tokens: &[Token]) -> Option<String> {
+    let mut in_units = false;
+    let mut at = 0;
+    while at < tokens.len() {
+        match (&tokens[at], tokens.get(at + 1)) {
+            (Token::Number(_), Some(Token::Word(_))) => {
+                in_units = true;
+                at += 2;
+            }
+            // A power on a unit: `m²`, `s^2`, `s^-2`.
+            (Token::Super(_), _) if in_units => at += 1,
+            (Token::Caret, Some(Token::Number(_))) if in_units => at += 2,
+            (Token::Caret, Some(Token::Minus)) if in_units && matches!(tokens.get(at + 2), Some(Token::Number(_))) => {
+                at += 3;
+            }
+            (Token::Slash | Token::Star, Some(Token::Word(_))) if in_units => at += 2,
+            (Token::Slash | Token::Star, Some(Token::Name(name))) if in_units && is_unit_word(name) => {
+                return Some(name.clone());
+            }
+            _ => {
+                in_units = false;
+                at += 1;
+            }
+        }
+    }
+    None
+}
+
+/// Works out a formula with the values given after it. Returns nothing if
+/// the input is not of that form. Otherwise the answer, or a refusal with
+/// the reason where that is certain.
+fn given(text: &str) -> Option<Result<Outcome, Option<Why>>> {
+    let (formula, values) = split_given(text)?;
+    Some(given_parts(formula, &values))
+}
+
+fn given_parts(formula: &str, values: &[(&str, &str)]) -> Result<Outcome, Option<Why>> {
+    for (index, (name, _)) in values.iter().enumerate() {
+        // A function, a constant or a keyword cannot also name a value.
+        if !is_valid_name(name) || is_complex_function(name) || matches!(*name, "j" | "π") {
+            return Err(None);
+        }
+        if values[..index].iter().any(|(earlier, _)| earlier == name) {
+            return Err(Some(Why::GivenTwice(name.to_string())));
+        }
+    }
+    // The names the lexer should know. A value cannot use its own name,
+    // which is what lets `V = 12V` be twelve volts.
+    let others = |own: &str| -> Vec<(String, Quantity)> {
+        values.iter().filter(|(name, _)| *name != own).map(|(name, _)| (name.to_string(), Quantity::plain(1.0))).collect()
+    };
+
+    let (_, formula) = without_label(formula);
+    let mut parts: Vec<(&str, Vec<Token>)> = Vec::new();
+    for (name, text) in std::iter::once(&("", formula)).chain(values) {
+        let tokens = lex(text, &others(name)).ok_or(None)?;
+        if let Some(word) = unit_or_name(&tokens) {
+            return Err(Some(Why::UnitOrName(word)));
+        }
+        parts.push((name, tokens));
+    }
+
+    // A word nothing knows. One such word is a value that was not given,
+    // or several values run together; more than one means the input is in
+    // words, which is for a model.
+    let is_given = |word: &str| values.iter().any(|(name, _)| *name == word);
+    let mut unknown: Vec<&str> = Vec::new();
+    for token in parts.iter().flat_map(|(_, tokens)| tokens) {
+        let strange = match token {
+            Token::Word(word) => (!all_maths(std::slice::from_ref(token))).then_some(word.as_str()),
+            Token::Name(name) => (!is_given(name)).then_some(name.as_str()),
+            _ => None,
+        };
+        if let Some(word) = strange
+            && !unknown.contains(&word)
+        {
+            unknown.push(word);
+        }
+    }
+    match unknown[..] {
+        [] => {}
+        [word] => {
+            let names: Vec<&str> = values.iter().map(|(name, _)| *name).collect();
+            return Err(Some(match run_together(word, &names) {
+                Some(pieces) => Why::RunTogether(word.to_string(), pieces.join("*")),
+                None => Why::NotGiven(word.to_string()),
+            }));
+        }
+        _ => return Err(None),
+    }
+
+    // Every value given must be used, or the formula is not the one meant.
+    let uses = |name: &str| {
+        parts.iter().flat_map(|(_, tokens)| tokens).any(|token| matches!(token, Token::Name(used) if used == name))
+    };
+    if let Some((name, _)) = values.iter().find(|(name, _)| !uses(name)) {
+        return Err(Some(Why::NotUsed(name.to_string())));
+    }
+
+    // Whether the work is electrical or mechanical, from the units of every
+    // part. It settles a lone `m` anywhere in the input.
+    let mut flags = Hints::default();
+    for token in parts.iter().flat_map(|(_, tokens)| tokens) {
+        if let Token::Word(word) = token
+            && let Some(Suffix::Unit { index, .. }) = lookup(word)
+        {
+            match UNITS[index].family {
+                Electrical => flags.electrical = true,
+                Mechanical => flags.mechanical = true,
+                Neutral => {}
+            }
+        }
+    }
+
+    // The values first, each as soon as the values it uses are known.
+    let mut known: Vec<(String, Quantity)> = Vec::new();
+    let mut carried = flags.clone();
+    let formula_tokens = parts.remove(0).1;
+    while !parts.is_empty() {
+        let ready = parts.iter().position(|(_, tokens)| {
+            tokens.iter().all(|token| match token {
+                Token::Name(name) => known.iter().any(|(have, _)| have == name),
+                _ => true,
+            })
+        });
+        // Values that depend on one another in a ring.
+        let Some(ready) = ready else { return Err(None) };
+        let (name, tokens) = parts.remove(ready);
+        // A value is named, so a prefix with no unit is refused, as it is
+        // for any named answer.
+        let part = Part { names: &known, hints: &flags, value_only: true };
+        let outcome =
+            reading_named(&tokens, None, true, &part).ok_or_else(|| why_refused(&tokens, None, true, &part))?;
+        // A percentage does not keep its meaning as a bare value.
+        if outcome.raw.percent {
+            return Err(None);
+        }
+        carried.add(&outcome.hints);
+        known.push((name.to_string(), outcome.raw));
+    }
+
+    let split = conversion_split(&formula_tokens);
+    let part = Part { names: &known, hints: &carried, value_only: false };
+    reading_named(&formula_tokens, split, true, &part)
+        .ok_or_else(|| why_refused(&formula_tokens, split, true, &part))
+}
+
+/// Splits a word into values the user named, and π, if it is nothing but
+/// two or more of them run together: `RC`, `πRC`.
+fn run_together<'a>(word: &'a str, names: &[&'a str]) -> Option<Vec<&'a str>> {
+    fn split<'a>(rest: &'a str, names: &[&'a str], found: &mut Vec<&'a str>) -> bool {
+        if rest.is_empty() {
+            return found.len() > 1;
+        }
+        for piece in names.iter().copied().chain(["π", "pi"]) {
+            if let Some(after) = rest.strip_prefix(piece) {
+                found.push(&rest[..piece.len()]);
+                if split(after, names, found) {
+                    return true;
+                }
+                found.pop();
+            }
+        }
+        false
+    }
+    let mut found = Vec::new();
+    split(word, names, &mut found).then_some(found)
 }
 
 /// `kelvin` reads a lone `K` as kelvin, not as the prefix kilo.
@@ -2119,7 +2441,8 @@ fn attempt(
     kelvin: bool,
     names: &[(String, Quantity)],
 ) -> Option<Outcome> {
-    attempt_noting(tokens, split, bare_m, kelvin, names, &mut None)
+    let part = Part { names, hints: &Hints::default(), value_only: false };
+    attempt_noting(tokens, split, bare_m, kelvin, &part, &mut None)
 }
 
 /// As `attempt`. When it refuses and knows why, the reason is left in `why`.
@@ -2128,7 +2451,7 @@ fn attempt_noting(
     split: Option<usize>,
     bare_m: BareM,
     kelvin: bool,
-    names: &[(String, Quantity)],
+    part: &Part,
     why: &mut Option<Why>,
 ) -> Option<Outcome> {
     // Typed input must be worth answering: more than a bare number. A step
@@ -2139,8 +2462,15 @@ fn attempt_noting(
         None => (tokens, None),
     };
 
-    let mut parser = Parser::new(expression, bare_m, names);
+    let mut parser = Parser::new(expression, bare_m, part.names);
     parser.kelvin = kelvin;
+    parser.electrical = part.hints.electrical;
+    parser.mechanical = part.hints.mechanical;
+    parser.joules = part.hints.joules;
+    parser.saw_pi = part.hints.saw_pi;
+    parser.celsius = part.hints.celsius;
+    parser.fahrenheit = part.hints.fahrenheit;
+    parser.typed = part.hints.typed.clone();
     let Some(result) = parser.sum() else {
         *why = parser.why.take();
         return None;
@@ -2154,6 +2484,26 @@ fn attempt_noting(
     }
     if !parser.has_value || !result.value.is_finite() || !result.im.is_finite() {
         return None;
+    }
+    if part.value_only {
+        // Nothing can be colder than absolute zero, named or not.
+        if result.kelvin().is_some_and(|kelvin| kelvin < -1e-9) {
+            *why = Some(Why::BelowZero);
+            return None;
+        }
+        return Some(Outcome {
+            answer: shown_as_is(result.value, ""),
+            quantity: result,
+            saw_bare_m: parser.saw_bare_m,
+            electrical: parser.electrical,
+            mechanical: parser.mechanical,
+            bare_prefix: parser.bare_prefix,
+            scale_typed: parser.celsius || parser.fahrenheit,
+            k_rate: parser.k_rate,
+            raw: result,
+            hints: Hints::of(&parser),
+            bare_text: parser.bare_text.take(),
+        });
     }
     if !in_program && !parser.interesting && wanted.is_none() {
         return None;
@@ -2253,6 +2603,8 @@ fn attempt_noting(
         mechanical: parser.mechanical || target.as_ref().is_some_and(|t| t.mechanical),
         scale_typed,
         k_rate: parser.k_rate,
+        raw: result,
+        hints: Hints::of(&parser),
         bare_text: parser.bare_text.take(),
     })
 }
@@ -2395,6 +2747,12 @@ pub fn evaluate_with_value(input: &str) -> Option<(Answer, f64)> {
     if text.is_empty() || text.chars().count() > 400 {
         return None;
     }
+    // A formula with its values after it. A comma means nothing else.
+    if let Some(result) = given(text) {
+        return result.ok().map(|outcome| {
+            (Answer { given: true, ..outcome.answer }, outcome.quantity.magnitude_or_value())
+        });
+    }
     let (labelled, text) = without_label(text);
     let tokens = lex(text, &[])?;
     if let Some(found) = temperature(&tokens) {
@@ -2411,13 +2769,18 @@ pub fn evaluate_with_value(input: &str) -> Option<(Answer, f64)> {
 /// Works out typed input, or a part of it, as ordinary maths. `split` is
 /// where a conversion's `to` is, if there is one.
 fn reading(tokens: &[Token], split: Option<usize>, labelled: bool) -> Option<Outcome> {
+    reading_named(tokens, split, labelled, &Part { names: &[], hints: &Hints::default(), value_only: false })
+}
+
+/// As `reading`, for one part of a formula with its values after it.
+fn reading_named(tokens: &[Token], split: Option<usize>, labelled: bool, part: &Part) -> Option<Outcome> {
     // A lone `K` is the prefix kilo (`4.7K`) or kelvin (`25 C + 10 K`).
     // Kilo is tried first, so everything that worked before still does.
-    let kilo = reading_with(tokens, split, labelled, false);
+    let kilo = reading_with(tokens, split, labelled, false, part);
     if !tokens.iter().any(|token| matches!(token, Token::Word(word) if word == "K")) {
         return kilo;
     }
-    let kelvin = reading_with(tokens, split, labelled, true);
+    let kelvin = reading_with(tokens, split, labelled, true, part);
     match (kilo, kelvin) {
         // Both readings work. It is kelvin beside a Celsius or Fahrenheit
         // temperature, and where it is written as a rate (`40 K/W`).
@@ -2426,7 +2789,13 @@ fn reading(tokens: &[Token], split: Option<usize>, labelled: bool) -> Option<Out
     }
 }
 
-fn reading_with(tokens: &[Token], split: Option<usize>, labelled: bool, kelvin: bool) -> Option<Outcome> {
+fn reading_with(
+    tokens: &[Token],
+    split: Option<usize>,
+    labelled: bool,
+    kelvin: bool,
+    part: &Part,
+) -> Option<Outcome> {
     // Someone who names the answer is working with real quantities. A value
     // with a prefix and no unit (`V = 2.2mA * 4.7k`) then has a unit they
     // left out, and reading it as a plain number would give the answer the
@@ -2435,12 +2804,12 @@ fn reading_with(tokens: &[Token], split: Option<usize>, labelled: bool, kelvin: 
 
     // A lone `m` after a number is milli in electrical shorthand (`2.2m`)
     // and metres in mechanical work (`5 m`). Try both readings.
-    let milli = attempt(tokens, split, BareM::Milli, kelvin, &[]);
+    let milli = attempt_noting(tokens, split, BareM::Milli, kelvin, part, &mut None);
     let saw_bare_m = milli.as_ref().is_none_or(|outcome| outcome.saw_bare_m);
     if !saw_bare_m {
         return milli.and_then(done);
     }
-    let metre = attempt(tokens, split, BareM::Metre, kelvin, &[]);
+    let metre = attempt_noting(tokens, split, BareM::Metre, kelvin, part, &mut None);
 
     match (milli, metre) {
         (Some(only), None) | (None, Some(only)) => done(only),
@@ -3132,7 +3501,7 @@ mod tests {
         silent("what is 5V + 3mA");
         silent("cutoff of an RC lowpass, R = 4.7k, C = 100nF");
         silent("tau for 1M and 22uF");
-        silent("re = 25mV / Ic, Ic = 2mA");
+        silent("re = 25mV / Ic");
         silent("5 furlongs");
         // Refused on purpose, but not for a reason this covers.
         silent("3 + 4i");
@@ -3168,6 +3537,94 @@ mod tests {
             assert!(evaluate(input).is_some(), "should answer {input:?}");
             assert_eq!(why_not(input), None, "should give no reason for {input:?}");
         }
+    }
+
+    #[test]
+    fn a_formula_with_its_values_after_it() {
+        check("re = 25mV / Ic, Ic = 2mA", "12.50 Ω");
+        check("gain = Rd * gm, Rd = 10kohm, gm = 2.1mS", "21.00");
+        check("fc = 1/(2*pi*R*C), R = 4.7kohm, C = 100nF", "338.6 Hz");
+        check("Vth = Vcc * R2 / (R1 + R2), Vcc = 9V, R1 = 100kohm, R2 = 22kohm", "1.623 V");
+        // No name in front, and a unit asked for.
+        check("Rd * gm, Rd = 10kohm, gm = 2.1mS", "21.00");
+        check("P = V^2 / R to mW, V = 5V, R = 1kohm", "25.00 mW");
+        // A value may use other values, given in any order.
+        check("Ic = beta * Ib, Ib = Vth / Rth, Vth = 1V, Rth = 20kohm, beta = 200", "10.00 mA");
+        // A value need not be something that could be shown by itself: a
+        // bare number, or a unit with no name of its own.
+        check("Id = 0.5 * k * (Vgs - Vth)^2, k = 2 mA/V^2, Vgs = 2.5V, Vth = 1V", "2.250 mA");
+        // Underscores, functions, complex values and temperatures all work.
+        check("V_ov = abs(V_off) * sqrt(I_D / I_DSS), V_off = -2.5V, I_D = 1.2mA, I_DSS = 6mA", "1.118 V");
+        check_complex(
+            "Z = R + 1/(j*w*C), R = 10kohm, C = 100nF, w = 2*pi*1kHz",
+            "10.13 kΩ ∠ −9.043°",
+            "10.00 − j1.592 kΩ",
+        );
+        check("T = Ta + P * Rth, Ta = 25 C, P = 2 W, Rth = 50 C/W", "125.0 °C");
+        // It works out the formula as typed, right or wrong.
+        check("P = V / R, V = 12V, R = 8ohm", "1.500 A");
+        check("Vc = Vcc - Ic * Rc, Vcc = 9V, Ic = 5mA, Rc = 4.7kohm", "−14.50 V");
+    }
+
+    #[test]
+    fn a_value_may_have_the_name_of_a_unit() {
+        // Alone, a word the user gave a value to is that value. Straight
+        // after a number it is a unit, as it always is.
+        check("P = V^2 / R, V = 12V, R = 8ohm", "18.00 W");
+        check("F = m * a, m = 5 kg, a = 9.81 m/s^2", "49.05 N");
+        check("X = 2*pi*f*L, f = 1kHz, L = 100mH", "628.3 Ω");
+        check("tau = R * C, R = 1Mohm, C = 22uF", "22.00 s");
+        check("KE = 0.5 * m * v^2, m = 2 kg, v = 3 m/s", "9.000 N·m");
+        // The units of the values decide how the answer is shown, as they
+        // would if the values were typed into the formula.
+        check("E = 0.5 * C * V^2, C = 100uF, V = 12V", "7.200 mJ");
+        check("0.5 * 100uF * (12V)^2", "7.200 mJ");
+        check("f = 1 / T, T = 20 ms", "50.00 Hz");
+        check("p2 = p1 * 2, p1 = 3 bar", "6.000 bar");
+        // In the run of units behind a number, a name that is also a unit
+        // could be either, so it is refused.
+        why(
+            "f = sqrt(k/m)/(2*pi), k = 100 N/m, m = 2 kg",
+            "m could be a unit or the value you named m. Give the value another name, such as m_1.",
+        );
+        check("f = sqrt(k/m_1)/(2*pi), k = 100 N/m, m_1 = 2 kg", "1.125 Hz");
+    }
+
+    #[test]
+    fn values_after_a_formula_are_held_to_the_same_rules() {
+        // A prefix with no unit is refused, as for any named answer.
+        why("gain = Rd * gm, Rd = 10k, gm = 2.1mS", "10k has a prefix but no unit.");
+        why("V = I * R, I = 2.2mA, R = 4.7k", "4.7k has a prefix but no unit.");
+        // Every name used must be given, once, and every value given used.
+        why("re = 25mV / Ic, Ib = 2mA", "Ic is not given a value.");
+        why("re = 25mV / Ic, Ic = 2mA, Ic = 3mA", "Ic is given a value twice.");
+        why("re = 25mV / Ic, Ic = 2mA, Rc = 4.7kohm", "Rc is given a value but not used.");
+        // `2V` is two volts, so the V that was given goes unused.
+        why("Vpp = 2V, V = 5V", "V is given a value but not used.");
+        check("Vpp = 2*V, V = 5V", "10.00 V");
+        why("fc = 2πRC, R = 4.7kohm, C = 100nF", "πRC is read as one name. Write it as π*R*C.");
+        why("tau = RC, R = 1Mohm, C = 22uF", "RC is read as one name. Write it as R*C.");
+        // The reasons for plain maths apply inside it.
+        why("P = V + I, V = 12V, I = 2A", "A voltage and a current cannot be added.");
+        why("a = b / c, b = 5V, c = 0 ohm", "That divides by zero.");
+        // Words with values after them are a problem for a model.
+        silent("cutoff of an RC lowpass, R = 4.7kohm, C = 100nF");
+        silent("voltage divider, 9V in, R1 = 10k on top, R2 = 4.7k to ground. vout?");
+        // Names that mean something else, values in a ring, and commas that
+        // are not between values.
+        silent("y = e * 2, e = 3");
+        silent("y = sin * 2, sin = 3");
+        silent("a = b * 2, b = c, c = b");
+        silent("2, 3");
+        silent("1,000 + 2");
+        silent("V = 4,7 * 2");
+    }
+
+    #[test]
+    fn programs_are_unchanged_by_values_after_a_formula() {
+        // A step of a program is one formula. A comma in it is an error.
+        assert!(run(&[expression("r_e", "25mV / I_c, I_c = 2mA")]).is_err());
+        assert_eq!(run(&[expression("I_c", "2mA"), expression("r_e", "25mV / I_c")]).unwrap()[1], "12.50 Ω");
     }
 
     #[test]

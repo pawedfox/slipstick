@@ -63,6 +63,9 @@ type Value = {
   si_value?: number;
   angle?: string;
   parts?: string;
+  /** The input was a formula with its values after it, worked out as
+   *  typed. Enter sends it on to Claude to be checked. */
+  given?: boolean;
 };
 
 /** One answer, several of equal standing, or two values compared. */
@@ -1019,8 +1022,17 @@ async function submit() {
     state.message = null;
     state.offer = false;
     void update();
-  } else if (state.asking || answered) {
-    // Already being asked, or already answered.
+  } else if (state.asking) {
+    // Already being asked.
+  } else if (answered) {
+    // Already answered. A formula with its values after it is worked out
+    // exactly as typed, though, so Enter has Claude check it: a formula
+    // that is definitely wrong is then flagged. Without Claude connected
+    // the instant answer simply stays.
+    if (state.shown?.given && !state.fromClaude) {
+      await refreshClaude();
+      if (claude.connected && input.value.trim() === text) void ask(text);
+    }
   } else if (state.offer) {
     void connect(); // Enter accepts the offer
   } else if (!state.pictures.length && state.explained !== text) {
