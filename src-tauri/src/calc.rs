@@ -558,6 +558,8 @@ struct Parser<'a> {
     fahrenheit: bool,
     /// A lone `K` came straight before a `/` and a unit, as in `40 K/W`.
     k_rate: bool,
+    /// The input has a π in it.
+    saw_pi: bool,
 }
 
 /// The deepest nesting the parser will follow: about a hundred brackets
@@ -596,7 +598,19 @@ impl<'a> Parser<'a> {
             celsius: false,
             fahrenheit: false,
             k_rate: false,
+            saw_pi: false,
         }
+    }
+
+    /// Whether a result in "per second" is known to count cycles, and so
+    /// can be called hertz: the user typed Hz; or the formula has a π in
+    /// it, as `1/(2π·R·C)` does; or a time was typed, as in `1/(20 ms)`.
+    ///
+    /// Without one of these it may as well be radians a second. `1/(R·C)`
+    /// is: it is 2π times the cutoff frequency.
+    fn counts_cycles(&self) -> bool {
+        self.saw_pi
+            || self.typed.iter().any(|&(index, _)| UNITS[index].names[0] == "Hz" || UNITS[index].dim == TIME)
     }
 
     /// Reads a word as a temperature scale, where one can stand.
@@ -889,6 +903,7 @@ impl<'a> Parser<'a> {
                 match word.as_str() {
                     "pi" | "π" => {
                         self.has_value = true;
+                        self.saw_pi = true;
                         return Some(Quantity::plain(PI));
                     }
                     "e" => {
@@ -1042,6 +1057,9 @@ struct Target {
     label: String,
     mechanical: bool,
     electrical: bool,
+    /// The target is hertz and nothing else (`Hz`, `kHz`): cycles a
+    /// second, which is not the same as `s^-1`.
+    hertz: bool,
 }
 
 fn superscript(power: i32) -> String {
@@ -1049,15 +1067,25 @@ fn superscript(power: i32) -> String {
         1 => String::new(),
         2 => "²".into(),
         3 => "³".into(),
+        -1 => "⁻¹".into(),
+        -2 => "⁻²".into(),
+        -3 => "⁻³".into(),
         n => format!("^{n}"),
     }
 }
 
 fn parse_target(tokens: &[Token]) -> Option<Target> {
     let mut parser = Parser::new(tokens, BareM::Metre, &[]);
-    let mut target =
-        Target { factor: 1.0, dim: NO_DIM, label: String::new(), mechanical: false, electrical: false };
+    let mut target = Target {
+        factor: 1.0,
+        dim: NO_DIM,
+        label: String::new(),
+        mechanical: false,
+        electrical: false,
+        hertz: false,
+    };
     let mut divide = false;
+    let mut units = 0;
 
     loop {
         let Some(Token::Word(word)) = parser.peek().cloned() else { return None };
@@ -1075,6 +1103,8 @@ fn parse_target(tokens: &[Token]) -> Option<Target> {
 
         let power = parser.unit_power();
         let signed = if divide { -power } else { power };
+        units += 1;
+        target.hertz = units == 1 && signed == 1 && unit.names[0] == "Hz";
         target.factor *= (scale * unit.factor).powi(signed);
         for (d, u) in target.dim.iter_mut().zip(unit.dim) {
             *d += u * signed as i8;
@@ -1549,7 +1579,14 @@ fn shown_by_default(value: f64, dim: Dim, joules: bool) -> Option<Answer> {
         // simply power. Angle only matters when comparing like with like.
         let mut without_angle = dim;
         without_angle[ANGLE] = 0;
-        (without_angle != dim).then(|| named(without_angle)).flatten()
+        if without_angle == dim {
+            return None;
+        }
+        // Energy for each radian is a torque: power over angular speed.
+        if without_angle == ENERGY && dim[ANGLE] < 0 {
+            return Some(shown_with_prefix(value, "N·m"));
+        }
+        named(without_angle)
     })
 }
 
@@ -1611,10 +1648,15 @@ fn attempt(
     } else if result.reading.is_some() {
         return None;
     } else if let Some(target) = &target {
-        if result.dim != target.dim {
+        let value = if result.dim == target.dim {
+            result.value
+        } else if in_program {
+            // Claude is told not to convert between rpm and Hz with `to`.
             return None;
-        }
-        shown_as_is(result.value / target.factor, &target.label)
+        } else {
+            across_angle(result, target, typed_in_hertz(&parser, result.dim))?
+        };
+        shown_as_is(value / target.factor, &target.label)
     } else if result.dim == THERMAL_RESISTANCE {
         // In the scale typed, as a datasheet gives it: °C/W.
         let scale = parser.typed_scale().unwrap_or(Scale::Kelvin);
@@ -1639,6 +1681,10 @@ fn attempt(
             // In a program, an in-between value may have a unit with no
             // name (mA/V² for a MOSFET's k). It is shown in SI base units
             // and labelled as such, so the steps after it can still run.
+            // Typed input only: what a program shows is as it was.
+            _ if !in_program && result.dim == FREQUENCY && !parser.counts_cycles() => {
+                shown_as_is(result.value, "s⁻¹")
+            }
             _ => match shown_by_default(result.value, result.dim, parser.joules) {
                 Some(answer) => answer,
                 None if in_program => shown_as_is(result.value, "(SI)"),
@@ -1658,6 +1704,40 @@ fn attempt(
         scale_typed,
         k_rate: parser.k_rate,
     })
+}
+
+/// Whether the result is a frequency the user gave in hertz, so that it is
+/// known to count cycles. A bare `1/s`, as from `1/(R*C)`, may as well be
+/// radians a second.
+fn typed_in_hertz(parser: &Parser, dim: Dim) -> bool {
+    let mut same_kind = parser
+        .typed
+        .iter()
+        .filter(|&&(index, power)| UNITS[index].dim.map(|d| d * power as i8) == dim)
+        .peekable();
+    dim == FREQUENCY && same_kind.peek().is_some() && same_kind.all(|&(index, _)| UNITS[index].names[0] == "Hz")
+}
+
+/// Converts a result to a target whose dimensions differ from it only by
+/// angle, where that has one meaning. Gives the value in the target's SI
+/// units.
+///
+/// - Rotation asked for in hertz, or hertz asked for as rotation: one
+///   revolution is one cycle, so `1500 rpm to Hz` is 25 Hz and
+///   `50 Hz to rad/s` is 314.2 rad/s.
+/// - Anything else that only loses an angle: the radian is dimensionless in
+///   SI, so torque times angular speed is power and `to hp` is allowed.
+fn across_angle(result: Quantity, target: &Target, in_hertz: bool) -> Option<f64> {
+    const CYCLE: f64 = 2.0 * PI;
+    if result.dim == ANGULAR_SPEED && target.hertz {
+        return Some(result.value / CYCLE);
+    }
+    if result.dim == FREQUENCY && target.dim == ANGULAR_SPEED {
+        return in_hertz.then_some(result.value * CYCLE);
+    }
+    let mut without_angle = result.dim;
+    without_angle[ANGLE] = 0;
+    (target.dim[ANGLE] == 0 && without_angle == target.dim).then_some(result.value)
 }
 
 /// A result that is a temperature: a reading on a scale, or a difference.
@@ -2298,9 +2378,76 @@ mod tests {
         check("1 rev to deg", "360.0 deg");
         check("sin(30 deg)", "0.5000");
         check("sin(pi/6)", "0.5000");
-        // rpm is an angular speed and Hz is not; they differ by 2π.
-        refuse("1500 rpm to Hz");
+        // rpm is an angular speed and Hz is not; they differ by 2π. The two
+        // are never mixed in a sum.
         refuse("1500 rpm + 25 Hz");
+    }
+
+    #[test]
+    fn rotation_and_frequency() {
+        // Asked for with `to`, one revolution is one cycle.
+        check("1500 rpm to Hz", "25.00 Hz");
+        check("90000 rpm to kHz", "1.500 kHz");
+        check("25 rev/s to Hz", "25.00 Hz");
+        check("314.159 rad/s to Hz", "50.00 Hz");
+        check("50 Hz to rpm", "3000 rpm");
+        check("2 * 50 Hz to rpm", "6000 rpm");
+        check("1.5 kHz to rpm", "90000 rpm");
+        check("50 Hz to rad/s", "314.2 rad/s");
+        check("n = 1500 rpm to Hz", "25.00 Hz");
+        // Hertz count cycles. A bare 1/s may as well be radians a second,
+        // as 1/(R·C) is, so it is not turned into a rotation.
+        refuse("1/(20 ms) to rpm");
+        refuse("1/(10kohm*100nF) to rad/s");
+        refuse("1/(10kohm*100nF) to rpm");
+        // The radian is dimensionless, so only the angle drops out.
+        check("1500 rpm to s^-1", "157.1 s⁻¹");
+        check("10 Nm * 1500 rpm to W", "1571 W");
+        check("10 Nm * 1500 rpm to hp", "2.106 hp");
+        check("1 kW / 1500 rpm to Nm", "6.366 N·m");
+        // Still unlike things.
+        refuse("1500 rpm to m");
+        refuse("50 Hz to deg");
+        refuse("90 deg to Hz");
+    }
+
+    #[test]
+    fn a_bare_per_second_is_not_called_hertz() {
+        // Known to count cycles: a π in the formula, a time, or Hz typed.
+        check("1/(2*pi*10kohm*100nF)", "159.2 Hz");
+        check("1/(2π√(2.5H*470pF))", "4.643 kHz");
+        check("1/(20 ms)", "50.00 Hz");
+        check("2 * 50 Hz", "100.0 Hz");
+        // Not known. 1/(R·C) is radians a second: 2π times the cutoff.
+        check("1/(10kohm*100nF)", "1000 s⁻¹");
+        check("10 ohm / 2 mH", "5000 s⁻¹");
+        check("1/sqrt(2.5H*470pF)", "29170 s⁻¹");
+        check("fc = 1/(10kohm*100nF)", "1000 s⁻¹");
+        // Asked for in hertz, it is taken at the user's word.
+        check("1.44/((1kohm + 2*10kohm)*100nF) to Hz", "685.7 Hz");
+        // A program shows what it did before.
+        assert_eq!(run(&[expression("w_c", "1/(10kohm*100nF)")]).unwrap(), ["1.000 kHz"]);
+    }
+
+    #[test]
+    fn power_over_rotation_is_a_torque() {
+        check("1 kW / 1500 rpm", "6.366 N·m");
+        check("1 hp / 3000 rpm", "2.374 N·m");
+        check("230 V * 10 A / 1500 rpm", "14.64 N·m");
+        // Torque times an angle is still work, labelled as before.
+        check("10 Nm * 2 rad", "20.00 N·m");
+        check("10 Nm * 1500 rpm", "1.571 kW");
+    }
+
+    #[test]
+    fn programs_do_not_convert_between_rotation_and_frequency() {
+        // Claude is told to divide by 60 instead, and its instructions
+        // have not changed.
+        let to = |text, unit| run(&[Step { name: "n_s", kind: StepKind::Expression(text), to: Some(unit) }]);
+        assert!(to("1500 rpm", "Hz").is_err());
+        assert!(to("50 Hz", "rpm").is_err());
+        assert!(to("10 Nm * 1500 rpm", "W").is_err());
+        assert_eq!(to("1500 rpm", "rad/s").unwrap(), ["157.1 rad/s"]);
     }
 
     #[test]

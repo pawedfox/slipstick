@@ -5,13 +5,13 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-22, version 0.10.0, not released): everything on the first
+Status (2026-11-22, version 0.10.1, not released): everything on the first
 roadmap is built, for the Claude Code route, and 0.9.2 is the first public
-release (see "Release"). 0.10.0 adds decibels and temperature sums to the
-instant path (see "Instant path"). Not built: the API-key route, signing,
-memory.
+release (see "Release"). 0.10.0 and 0.10.1 add decibels, temperature sums
+and conversions between rpm and Hz to the instant path (see "Instant
+path"). Not built: the API-key route, signing, memory.
 The roadmap was revised on 2026-11-22, after that release (see "Roadmap").
-Next: `rpm to Hz`, then complex numbers.
+Next: complex numbers.
 
 ## Purpose
 
@@ -467,9 +467,50 @@ Rules:
   electrical units mean milli; mechanical units or a length asked for mean
   metres); if it still cannot tell, there is no answer. `mm`, `mA` and
   the like are never ambiguous.
-- **rpm is an angular speed and Hz is not.** They differ by 2π, so
-  `1500 rpm to Hz` is refused, while `10 N·m * 1500 rpm` correctly gives
-  1.571 kW.
+- **rpm is an angular speed and Hz is not.** They differ by 2π, so the
+  two are never mixed in a sum (`1500 rpm + 25 Hz` is refused), while
+  `10 N·m * 1500 rpm` correctly gives 1.571 kW.
+- **Asked for with `to`, one revolution is one cycle** (0.10.1,
+  2026-11-22; until then `1500 rpm to Hz` was refused):
+  - a rotation in hertz: `1500 rpm to Hz` is 25.00 Hz, and so for
+    `rev/s` and `rad/s`;
+  - hertz as a rotation: `50 Hz to rpm` is 3000 rpm, and
+    `50 Hz to rad/s` is 314.2 rad/s. This is only for a frequency typed
+    in hertz, which is known to count cycles. A bare 1/s is not turned
+    into a rotation, because it may as well be radians a second, as
+    1/(R·C) is: `1/(10kohm*100nF) to rad/s` and `1/(20 ms) to rpm` are
+    refused.
+- **Otherwise an angle simply drops out when a unit is asked for**,
+  because the radian is dimensionless: `10 Nm * 1500 rpm to hp` is
+  2.106 hp, `1 kW / 1500 rpm to Nm` is 6.366 N·m, and `1500 rpm to s^-1`
+  is 157.1 s^-1. Before 0.10.1 these were refused.
+- Neither applies in a program. Claude is told not to convert between
+  rpm and Hz with `to`, and its instructions are unchanged.
+- **A "per second" is called hertz only when it is known to count
+  cycles** (0.10.1, decided by the user 2026-11-22). Until then every
+  bare 1/s was labelled Hz, and `1/(10kohm*100nF)` showed 1.000 kHz. That
+  number is 1/(R·C), which is radians a second: 2π times the cutoff
+  frequency, 159.2 Hz. Read as a cutoff it was wrong by 2π with no
+  warning.
+  - It is hertz when the user typed Hz, when the formula has a π in it
+    (`1/(2*pi*10kohm*100nF)` is 159.2 Hz), or when a time was typed
+    (`1/(20 ms)` is 50.00 Hz).
+  - Otherwise it is shown as `s⁻¹`, with no prefix:
+    `1/(10kohm*100nF)` is 1000 s⁻¹.
+  - Only the label changes, never the number. The rule is a rule of
+    thumb about the label: it may say `s⁻¹` where hertz would have been
+    right (a 555's `1.44/((R1 + 2·R2)·C)`), and the user can then ask for
+    it with `to Hz`, which is taken at their word.
+  - Known and left: `2π × 1kHz` still reads 6.283 kHz, though it is
+    radians a second.
+  - A mode switch for the kind of maths was considered and turned down:
+    the same keys would give different answers depending on a setting
+    made earlier, and one person types both forms in the same minute.
+  - Typed input only. What a program shows is as it was.
+- **Power over an angular speed is a torque**, shown in N·m:
+  `1 kW / 1500 rpm` is 6.366 N·m. Before 0.10.1 it was labelled J. This
+  one applies to programs as well; it changes a label and nothing that
+  is accepted or refused.
 - **A temperature on the Celsius or Fahrenheit scale is a point, not an
   amount.** It can have a difference added or taken away, and two can be
   subtracted. Two cannot be added, and one cannot be multiplied, divided,
@@ -541,8 +582,14 @@ Rules:
   metric horsepower is `PS`.
 
 Not in the instant path: complex numbers, variables, the decimal comma,
-conversions between rpm and Hz, and a plain ratio in decibels. Those go to
-Claude.
+and a plain ratio in decibels. Those go to Claude.
+
+Checked for 0.10.1 (2026-11-22): 61 unit tests, of which four groups are
+new (rotation and frequency, that programs do not convert between them,
+the per-second label, and torque from power over rotation); every
+reference problem through the instant path alone, with the same three
+answered as in 0.10.0; and nine of the inputs above typed into the window
+in the built-in browser. Not checked: the real app.
 
 Checked for 0.10.0 (2026-11-22): 57 unit tests, of which five groups are
 new (levels, ratios in decibels, temperatures and differences, the lone
@@ -1323,7 +1370,11 @@ and has not broken an earlier item.
    accepted or refused gets a unit test, and the evaluator stays strict.
    - *Built 2026-11-22, in 0.10.0:* decibels and temperature sums (see
      "Instant path"). Not released.
-   - Left: `rpm to Hz`, then complex numbers and impedance.
+   - *Built 2026-11-22, in 0.10.1:* `rpm to Hz` and back, and `to hp` or
+     `to Nm` on torque and speed. Torque times speed is unchanged. A bare
+     "per second" is no longer called hertz, and power over rotation is
+     shown as a torque. Not released.
+   - Left: complex numbers and impedance.
 3. **Get it used, then apply for signing.** The author posts it where
    engineers would use it. When there are stars, downloads or discussion
    to point to, apply to SignPath (what to do then is under "Release").

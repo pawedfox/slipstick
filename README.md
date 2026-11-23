@@ -9,8 +9,8 @@ hand harder problems to Claude if you want it to.
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
 Status: version 0.9.2 is the first public release. This page describes
-0.10.0, which is not released yet: it adds temperatures and decibels to
-what is answered as you type. It is one person's tool,
+0.10.1, which is not released yet: it adds temperatures, decibels and
+conversions between rpm and Hz to what is answered as you type. It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
@@ -33,6 +33,8 @@ No account and no network. The answer changes with every key.
 | `4k7 + 330` | 5.030 k |
 | `6 bar * pi * (25mm)^2` | 1.178 kN |
 | `10 Nm * 1500 rpm` | 1.571 kW |
+| `10 Nm * 1500 rpm to hp` | 2.106 hp |
+| `1500 rpm to Hz` | 25.00 Hz |
 | `3.5 bar to psi` | 50.76 psi |
 | `12 L/min to gpm` | 3.170 gal/min |
 | `100 C to F` | 212.0 °F |
@@ -52,7 +54,12 @@ It understands:
   (Pa, bar, psi, atm), torque (N·m, lb·ft), power (W, hp), angle and
   rotation (deg, rad, rpm), volume and flow (L, gal, L/min, gpm, cfm), and
   speed. Volts times amps comes out in watts; volts plus amps is refused.
-- **Conversions** with `to` (or `in`): `25 mm to in`.
+- **Conversions** with `to` (or `in`): `25 mm to in`. Between rpm and Hz
+  one revolution is one cycle, so `50 Hz to rpm` is 3000 rpm. The two are
+  never mixed in a sum.
+- **Hertz only where it is hertz.** `1/(2*pi*R*C)` is a frequency and is
+  shown in Hz. `1/(R*C)` is 2π times that, in radians a second, so it is
+  shown as `s⁻¹` and not passed off as a cutoff frequency.
 - **Temperatures.** A temperature can have a rise added or taken away, so
   junction and heatsink sums work. One temperature less another is a
   difference, shown as `Δ°C` so it is not read as a temperature. Adding
@@ -203,8 +210,7 @@ decided and why, and what has and has not been tested.
 - A way to use Claude without Claude Code installed.
 - Memory of your notation and preferences.
 - Not tested: Windows 10, and displays scaled above 125%.
-- Not in the instant path: complex numbers, and conversions between rpm
-  and Hz. Those go to Claude.
+- Not in the instant path: complex numbers. Those go to Claude.
 - Answers from Claude are checked against a set of 46 reference problems.
   The instructions given to Claude were tuned on that same set, so passing
   it says less than it seems to.
