@@ -7,7 +7,7 @@ check), the old name is left in place.
 
 Status (2026-11-22, version 0.10.1): everything on the first roadmap is
 built, for the Claude Code route. 0.9.2 was the first public release, and
-0.10.1 was tagged for release on 2026-11-22 (see "Release"). 0.10.0 and
+0.10.1 is the current release, published 2026-11-22 (see "Release"). 0.10.0 and
 0.10.1 add decibels, temperature sums and conversions between rpm and Hz
 to the instant path (see "Instant path"). Not built: the API-key route,
 signing, memory.
@@ -246,6 +246,16 @@ public.
   temperature sums and the rpm and Hz conversions in the installed app:
   until then they had been checked only in unit tests and in the window
   in the built-in browser. 0.10.0 was never tagged and has no release.
+  - GitHub built it in six and a half minutes, every step passing, and
+    the checksum in `SHA256SUMS.txt` is the installer's.
+  - **Tried by the user the same day**, from the draft, installed over
+    0.9.2: eight inputs covering decibels, temperature sums, rpm and Hz,
+    the `s⁻¹` label and the torque label each showed the expected answer;
+    a problem sent to Claude worked; and the settings were as they had
+    been left.
+  - **Published 2026-11-22** on the user's word. Checked without signing
+    in: it is the latest release, and the downloaded installer's SHA-256
+    is the one in `SHA256SUMS.txt`.
 - **Published 2026-11-21**, on the user's word, after the user installed
   the 0.9.2 installer from the draft and found it working. Checked
   without signing in: the repository page, the README's pictures and the
@@ -594,13 +604,14 @@ new (rotation and frequency, that programs do not convert between them,
 the per-second label, and torque from power over rotation); every
 reference problem through the instant path alone, with the same three
 answered as in 0.10.0; and nine of the inputs above typed into the window
-in the built-in browser. Not checked: the real app.
+in the built-in browser. The real app was checked by the user from the
+0.10.1 installer (see "Release").
 
 Checked for 0.10.0 (2026-11-22): 57 unit tests, of which five groups are
 new (levels, ratios in decibels, temperatures and differences, the lone
 `K`, and that programs have neither); and ten of the examples above typed
 into the window in the built-in browser, each showing the number and unit
-given here. Not checked: the real app. The installed copy is still 0.9.2.
+given here. The real app was checked later, as 0.10.1 (see "Release").
 
 ## Solver
 
