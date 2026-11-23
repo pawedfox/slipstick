@@ -11,24 +11,59 @@ built, for the Claude Code route. 0.9.2 was the first public release,
 day (see "Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
 conversions between rpm and Hz to the instant path, and 0.11.0 adds
 complex numbers (see "Instant path"). That completes item 2 of the
-roadmap. Not built: the API-key route, signing, memory.
-The roadmap was revised on 2026-11-22 (see "Roadmap").
-Next: item 3, getting it used.
+roadmap. Not built: a second route to a model (first planned as an
+API-key route, now provider-neutral), signing, memory.
+The mission was re-framed on 2026-11-23 (see "Purpose") and the roadmap
+revised with it (see "Roadmap"). The app itself is unchanged by that:
+0.11.0 still runs on Windows only and still asks Claude through Claude
+Code only.
+Next: item 1 of the new roadmap, hardening the engine so that asking a
+model becomes a last resort.
 
 ## Purpose
 
-The fastest engineering calculator on Windows, which can also reason when
-asked. A tiny always-on-top window for electrical, mechanical and general
-mechatronics work.
+Re-framed by the user on 2026-11-23. The app as built is narrower than
+this; "Roadmap" says how it gets from there to here.
+
+Slipstick exists to take the friction out of engineering and scientific
+calculation. It gives instant, correct answers to simple formulas and hard
+problems alike, in a tool that is simple, easy to understand, and shows its
+working so that people can learn from it. It is free and open source, for
+every desktop operating system. No part of it depends on one company's AI:
+harder problems can go to whichever model the user chooses, or to none.
+
+What follows from that:
+
+- **The engine first** (decided by the user 2026-11-23). The app should do
+  as much as it can with no model at all, so that asking one is a last
+  resort and not the way in. See "Hardening the engine".
+- **Correct comes first.** Whatever model reads a problem, the app's engine
+  works out every number. A way of answering that shows wrong numbers with
+  no warning is worse than not having it.
+- **Open to everyone.** Windows, macOS and Linux. Nothing the app does may
+  need an account, a payment or one particular AI company.
+- **Simple to use and to read.** One small window, and information that is
+  easy to take in and never overwhelming. "Design principle" below stands.
+- **Somewhere to learn.** The steps show how an answer was reached, so the
+  app can teach the working as well as do it. What more this asks of the
+  window is not decided.
+- **Engineering and science.** The first purpose was electrical, mechanical
+  and mechatronics work. Science is added; which units and constants that
+  needs is not decided.
 
 Two ways it answers:
 
 - **Instantly, on the machine.** Arithmetic, engineering prefixes, units and
   conversions are answered as you type, with no account and no network.
   This is the part used dozens of times a day, so it comes first.
-- **By reasoning, with Claude.** For problems that need a formula chosen or
-  several steps worked through. Optional: the app is complete without it.
-  Claude interprets the problem; real code computes the numbers.
+- **By reasoning, with a model.** For problems that need a formula chosen
+  or several steps worked through. Optional: the app is complete without
+  it. The model interprets the problem; real code computes the numbers.
+  Today the model is Claude, through the user's own Claude Code.
+
+The purpose until 2026-11-23 was: "The fastest engineering calculator on
+Windows, which can also reason when asked. A tiny always-on-top window for
+electrical, mechanical and general mechatronics work."
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
@@ -54,7 +89,7 @@ behind the "show steps" caret.
 |---|---|
 | Compute | Claude writes the formulas; the app's own engine computes every number. Claude replies with a short program of named steps and never writes a number it worked out. This replaced the earlier plan to use Anthropic's hosted code execution (2026-11-19): it works the same on both routes, needs one model turn instead of two, and a mistake in a formula shows up as a step that will not run, not as a plausible wrong answer. See "Solver". |
 | Instant path | Plain arithmetic is answered locally as you type, with no network call. Claude is used only when the input needs reasoning. See "Instant path" below. |
-| Access | Claude is optional. The app works fully with no account, and offers to connect Claude only when the user first presses Enter on something that needs it. Two routes: the user's own installed Claude Code on their plan (detected automatically), or their own API key, entered with guidance and stored in Windows Credential Manager. Never in the repo, never in a plain file. |
+| Access | Claude is optional. The app works fully with no account, and offers to connect Claude only when the user first presses Enter on something that needs it. Two routes: the user's own installed Claude Code on their plan (detected automatically), or their own API key, entered with guidance and stored in Windows Credential Manager. Never in the repo, never in a plain file. **Revised 2026-11-23:** the second route is no longer an Anthropic key alone. It is one provider-neutral route (see "Models other than Claude"), and a key, where one is needed, is kept in the operating system's credential store. Not built. |
 | Stack | Tauri 2. Rust core (API calls, key storage, window, hotkey, tray, memory file). Small web UI with KaTeX for formulas. |
 | API client | Raw HTTPS from Rust (there is no official Anthropic Rust SDK). Streaming responses. |
 | Model | Default: Sonnet 5.5 at low effort, chosen on accuracy (see "Solver"). A settings dropdown offers others. Haiku 5.5 is about 15 times cheaper but was not accurate enough to be the default. |
@@ -69,7 +104,7 @@ behind the "show steps" caret.
 | Hotkey | Default Ctrl+Alt+C. Checked at every launch; if another program holds it, prompt for a new one. Simple "press a new shortcut" control in settings. |
 | Background | Esc hides to tray; app keeps running. "Start with Windows" optional, off by default. Quit from the tray menu. |
 | Copy | Click the answer, or Ctrl+C with nothing selected, copies a plain number with no unit. Nothing is copied automatically. Which number is set out under "Instant path". |
-| Platform | Windows first. |
+| Platform | Windows first. macOS, then Linux, follow (decided 2026-11-23; see "Other operating systems"). |
 | Licence | MIT. Repo private until v1 works, then public. |
 
 ## Answer states
@@ -152,7 +187,9 @@ Memory holds preferences only. It never holds problems, answers or history.
   the choices made in settings), a
   copy of the solver instructions in the app's cache folder for Claude Code
   to read, and, once built, the
-  memory notes file. The API key lives in Windows Credential Manager.
+  memory notes file. A key for a model service, once that route is built,
+  lives in the operating system's credential store (Windows Credential
+  Manager on Windows).
   Nothing else. Session history is never written to disk.
 - No telemetry, no analytics, no history, no logging of problems or answers.
 - Every problem (and the memory notes) is sent to Anthropic's API to be
@@ -160,6 +197,10 @@ Memory holds preferences only. It never holds problems, answers or history.
   plainly. (It does, in its "Privacy" section, worded for the Claude Code
   route: problems go to Anthropic through Claude Code, under the terms of
   the user's Claude account.)
+- Once other models can be chosen (see "Models other than Claude"), a
+  problem goes to whichever service the user chose. The README must say
+  that as plainly, and must say where a free service may keep or learn
+  from what it is sent.
 
 ## README
 
@@ -1167,7 +1208,8 @@ Flag changes the answer as described.
 ## Out of scope for v1
 
 - Follow-up context between problems (possible later, optional).
-- macOS and Linux builds.
+- macOS and Linux builds were listed here until 2026-11-23. They are now
+  on the roadmap. Whether version 1.0 waits for them is not decided.
 - History saved to disk. (Session history in memory is in scope.)
 - Memory of preferences (designed above; built after v1).
 
@@ -1416,7 +1458,304 @@ What was found (2026-11-19):
 - Not checked: a real usage-limit or server-error message in the installed
   app. Only the unknown-model message was seen for real.
 
+## Hardening the engine
+
+Decided by the user on 2026-11-23: the way forward is to make the app as
+capable and as dependable as it can be with no model at all, so that
+asking one becomes a small part of its use. Nothing here is built.
+
+**What the reference set shows.** Its 46 problems were sorted by what each
+needs. The set was written to test the model, so it leans towards worded
+problems and is not a picture of daily use.
+
+- 3 are answered by the instant path today.
+- About ten are a formula the user typed, followed by its values
+  (`re = 25mV / Ic, Ic = 2mA`). These need no model, only an engine that
+  takes values listed after a formula.
+- About twenty-five are a standard formula named in words ("cutoff of an
+  RC lowpass"). The engine can work out every one; the model supplies only
+  the formula.
+- The rest are real circuit analysis, or inputs that must be refused.
+
+Every answer in the set is already worked out by the engine, from formulas
+Claude writes. So hardening is largely letting a person type what Claude
+types.
+
+**The slices, cheapest first.** One at a time, each with its tests:
+
+1. **Saying why it refused,** where the cause is certain ("volts and amps
+   cannot be added"). Today nothing is shown, so a slip and a limit look
+   the same. It still never guesses a number.
+2. **Values after a formula:** `gain = Rd * gm, Rd = 10k, gm = 2.1mS`.
+3. **Solving for an unknown:** `10 Hz = 1/(2*pi*1M*C)` gives C. The solver
+   exists already, for Claude's working.
+4. **Named values that last the session:** `R1 = 10k`, then `R1` in what
+   follows. Held in memory only.
+5. **Constants and units for science:** Boltzmann's constant, the electron
+   charge, `c`, `g`; moles, electronvolts.
+6. **Helpers for the trade:** the nearest standard resistor value,
+   tolerance ranges, hexadecimal and binary.
+7. **Steps for answers the engine gives by itself** (asked about by the
+   user 2026-11-23; found possible, not designed). See below.
+
+A **formula library** (type "rc cutoff" and be given the formula to fill
+in) is the largest piece and comes after the rest. It is what would take
+the worded problems away from the model, and it is where "learn from it"
+mostly lives. It needs a decision about the window first.
+
+**Steps without a model.** The window already shows Steps for any answer
+that carries them, so the work is in the engine:
+
+- An input with named parts (slices 2 to 4) is a short program of the kind
+  Claude writes, and can be run the same way. Each named line is a step,
+  with its value, at no extra cost.
+- A single expression has no named parts. The engine works it out as it
+  reads it and keeps no record of the parts, so it would have to note each
+  bracket and operation as it goes, with a note made from the operator
+  ("add", "divide", "in parallel").
+- An unknown is found by trial, not by rearranging, so its steps cannot
+  show the algebra. They can show the equation and the value put back in
+  as a check.
+- "Trust" under "Settled decisions" says instant answers stay bare and
+  that the formula line marks an answer as the model's. Steps on local
+  answers must not blur that. To be decided with the user before it is
+  built.
+
+**What stays with a model:** a problem whose formula the user does not
+know and the library does not have; pictures; and flagging a formula as
+wrong. The engine can show that `P = V / R` comes out in amps, but cannot
+know that power was meant.
+
+**Two cautions.** The work has no natural end, so it is done in slices
+with a stopping point. And every new input accepted is a new way to
+misread one: the rule that the evaluator returns nothing when unsure, and
+a test for each thing accepted or refused, matter more as it grows.
+
+## Models other than Claude
+
+Researched 2026-11-23, from the code and from each service's own pages.
+Nothing here is built, and no model but Claude has been measured.
+
+**Decided by the user later the same day: models that run on the user's
+own machine are dropped as an aim.** People are unlikely to give the time,
+disk space and computing to one for the sake of a calculator. And once the
+engine does more (see "Hardening the engine"), what is left for a model is
+the hardest work, choosing a formula from a description and reading
+pictures, which small models do worst. The route below would still reach
+a local runner if someone pointed it at one, since the format is the same,
+but nothing is to be designed, measured or documented for that. What
+follows is kept as researched, with that decision marked where it applies.
+
+**What the model does.** It reads the problem and writes formulas; the
+engine works out every number (see "Solver"). So the whole exchange is the
+instructions and one problem, with any pictures, going in, and one small
+JSON reply coming back, with one more try if the working will not run.
+Nothing in `prompts/solver.md` is particular to Claude.
+
+**One format covers nearly everything.** Most services, and the programs
+that run a model on the user's own machine, accept the same request format
+("chat completions", first OpenAI's). One way of asking in that format
+reaches all of them. A key is then one optional field, not a feature.
+
+The routes, by what the user has to do:
+
+| Route | What the user does | Cost | State |
+|---|---|---|---|
+| Instant path | Nothing | Free | Built |
+| Claude Code | Install it and sign in | A Claude plan | Built. The one permitted way to use a Claude plan (see "Running Claude Code") |
+| A model on their machine (Ollama, LM Studio) | Install the runner and download a model | Free | Same format. Nothing leaves the machine. Dropped as an aim |
+| OpenRouter, by signing in | One click in the browser | Its free models | Same format. No key is pasted |
+| Gemini, with a free key | Paste a key | Free tier | Same format |
+| Any other service, with a key | Paste a key | Pay per use | Same format; Claude through Anthropic's own endpoint |
+
+Read from documentation on 2026-11-23, not tested with a live request:
+
+- **Ollama** answers at `http://localhost:11434/v1/`, ignores the key, and
+  documents pictures and a reply held to a JSON schema. **LM Studio**
+  answers at `http://localhost:1234/v1`, with text and pictures.
+- **OpenRouter** has a sign-in flow (OAuth with PKCE) that hands the app a
+  key the user controls. A callback to `localhost` on any port is allowed,
+  and the app holds no secret of its own. Free models allow 20 requests a
+  minute and 50 a day, or 1000 a day once ten credits have been bought.
+  Its pages do not say whether a payment card is needed for the free ones.
+- **Gemini** accepts the same format at
+  `https://generativelanguage.googleapis.com/v1beta/openai/`, marked as
+  beta, with pictures and structured output. Google publishes no free-tier
+  numbers; they are shown in AI Studio. Guides by others say a free key
+  needs no billing account and that what is sent on the free tier may be
+  used to improve Google's products. Google's own pages, as read, confirm
+  neither.
+- **Claude with a key** goes to Anthropic's own endpoint (see "Read from
+  documentation, not yet tested with a live request"). Anthropic also has
+  a layer in the common format, but describes it as not meant for
+  production, so it is not to be used.
+- **Keeping a key.** The Rust `keyring` crate has backends for Windows,
+  Apple and Linux credential stores.
+
+Not to be built on:
+
+- **Any one free offer from a cloud service.** Two went in 2026: GitHub
+  Models was retired on 2026-07-30, and the free tier of Google's Gemini
+  command-line tool ended on 2026-06-18. What cannot be withdrawn is what
+  runs with no model: the engine.
+- **Other companies' command-line tools,** run as Claude Code is. Their
+  terms have not been read. OpenAI's Codex runs without a window
+  (`codex exec`) in a read-only sandbox, but whether its tools can be
+  switched off altogether was not confirmed.
+- **Models built into the operating system or the browser.** Apple's
+  on-device model is small, is reached only from Swift, and needs a device
+  that supports Apple Intelligence. The one in Microsoft Edge is a
+  preview, and nothing was found saying WebView2 has it.
+
+**An engine of the project's own.** The user's aim is an AI engine that
+can be switched on and runs on the machine, so that no outside service is
+needed. Two forms are realistic, and neither is training a model from
+nothing:
+
+- *Needing a model less.* Widening the engine: solving for an unknown,
+  named values, physical constants, units for science. Each is free,
+  instant and exact, for everyone. **This is the one chosen** (see
+  "Hardening the engine").
+- *A model the app downloads.* An open model of a few gigabytes, fetched
+  when the user switches it on. Feasible but large, and worth it only if
+  a small model is good enough, which nothing yet shows. **Dropped.**
+- Before any model is trained on the replies of another, the terms of the
+  service that wrote those replies have to be read.
+
+**The rule this needs** (proposed 2026-11-23, not yet confirmed by the
+user). "Correct" and "any model" pull against each other. The engine
+catches units that do not balance; it cannot catch a wrong formula whose
+units happen to work. Haiku 5.5, a capable model, passed 39 to 42 of 46
+and showed one wrong number with no warning (see "Measured on the
+reference set"). Smaller models are likely to do worse. So correctness
+stays fixed, and a route is measured on the reference set before the app
+recommends it.
+
+**What building it changes:**
+
+- The app makes network calls of its own for the first time. Today only
+  Claude Code does. They are made only when Enter is pressed, and only to
+  the service the user chose.
+- A key is kept in the operating system's credential store, and nowhere
+  else.
+- The Claude row in settings becomes a choice of where harder problems go,
+  and wording such as "Asking Claude" has to fit any model. The window
+  must not gain more than that without the user being asked.
+- The reference runner needs a way to ask in the common format. That is
+  also the tool for the measuring.
+
+## Other operating systems
+
+Reviewed 2026-11-21 and again 2026-11-23, from the code and from Tauri's
+and Claude Code's pages. Nothing is built or tried.
+
+**What carries over as it is:** the engine and the solver, the window's
+own logic, the settings file's location, and the plugins for the hotkey,
+the tray, a single running copy and starting at sign-in.
+
+**macOS, without needing a Mac:**
+
+- The bundle list in `tauri.conf.json` names only the Windows installer,
+  the release workflow has only a Windows job, and its checksum step looks
+  only for `.exe` files.
+- `find_program` looks in Windows folders. On macOS and Linux the native
+  install is documented at `~/.local/bin/claude`; where Homebrew puts it
+  is not documented.
+- Stopping a question ends one process off Windows, not everything that
+  process started.
+- Copy, paste and opening the settings test for Ctrl, where a Mac uses
+  Cmd. The rule for a shortcut insists on Ctrl or Alt.
+- "Start with Windows", the "Windows" theme choice, "on this PC" and
+  "taskbar" are in the window and its messages.
+- The Cascadia and Consolas fonts are not on a Mac.
+
+**macOS, needing a Mac to settle:**
+
+- The window. `clip` does nothing off Windows. Whether clicks pass through
+  the transparent part of a window on macOS is disputed in what was found.
+- Focus: hiding the Dock icon, taking focus on the shortcut, giving it
+  back on Esc, and showing over a full-screen app.
+- Sign-in. Claude Code keeps its sign-in in the macOS Keychain; whether it
+  reads it without a prompt when another app starts it is not known.
+- The web engine. macOS and Linux use WebKit, and the layout, pasted
+  pictures and copying have only run on Chromium.
+
+**A decision still to be made for macOS.** An app started from the Dock
+does not get the variables set in a terminal profile, so a key set there
+would not reach Claude Code, which would then sign in differently from how
+it does in the user's terminal. The README says the opposite today.
+Reading the shell's variables would put that right, but conflicts with
+handing the environment on untouched (see "Running Claude Code"). This
+comes from general knowledge of macOS; Claude Code's pages do not cover
+it.
+
+**Signing on macOS.** Tauri can sign an app "ad hoc" at no cost, which
+Apple Silicon requires of anything from the internet. Users must still
+allow the app under Privacy & Security. Notarising, which removes that
+step, needs Apple's paid developer account (99 US dollars a year, by
+Tauri's page).
+
+**The transparent window** needs no special setting on macOS: Tauri's
+private-API switch has done nothing since 2.12.1, and the app is on
+2.12.7.
+
+**Linux:**
+
+- The library behind the hotkey lists "Linux (X11 Only)". Most current
+  distributions use Wayland.
+- Clicks on the tray icon are not reported on Linux, so only its menu
+  works.
+- Claude Code keeps its sign-in in a file under `~/.claude`, as on
+  Windows.
+- From general knowledge, not confirmed in Tauri's pages: under Wayland an
+  app cannot place its own window or keep itself on top.
+
 ## Roadmap
+
+Revised 2026-11-23 with the user, when the mission was re-framed (see
+"Purpose"). What changed and why:
+
+- The user judges that the Claude Code connection is what most puts people
+  off: harder problems need a paid plan and a command-line program. Asking
+  for an API key is no better for most people. There are too few users
+  yet to check this against.
+- The answer chosen is to need a model less, not to offer more of them.
+  Hardening the engine comes first, so that asking a model is a last
+  resort (see "Hardening the engine"). The order first written that day
+  began with measuring other models; the user changed it within hours.
+- Models that run on the user's own machine are dropped as an aim (see
+  "Models other than Claude").
+- The API-key route (item 4 of the 2026-11-22 roadmap) is replaced by one
+  small provider-neutral route, so that the last resort is not Claude
+  alone. It comes after macOS.
+- macOS and Linux come into scope. With a model a last resort, a version
+  for another system rests on the engine and the window, which makes the
+  uncertain parts of running Claude Code there matter less.
+
+Each item is done only when it works in the running app, passes its tests,
+and has not broken an earlier item.
+
+1. **Harden the engine.** The slices under "Hardening the engine", one at
+   a time, each with its tests and each leaving the evaluator strict.
+2. **macOS.** First a short trial of the window and of focus on a real
+   Mac, which decides whether the rest is worth doing; then the port. A
+   Mac is available to test on. See "Other operating systems".
+3. **The provider-neutral route.** One way of asking that covers free
+   services and paid keys; a key, where one is needed, in the operating
+   system's credential store; one settings row; the README's privacy
+   section rewritten for it. Each service would be run through the
+   reference set before the app recommends it (a rule proposed, not yet
+   confirmed). Claude Code stays as it is. See "Models other than
+   Claude".
+4. **Linux.**
+5. **The formula library,** and with it what "learn from it" asks of the
+   window.
+
+Kept from the 2026-11-22 roadmap and not placed in this order: getting it
+used and applying for signing (the author's, and able to go on alongside),
+follow-up context, and memory.
+
+### The roadmap of 2026-11-22
 
 Revised 2026-11-22 with the user, after the first public release. What
 changed and why:
@@ -1468,20 +1807,23 @@ and has not broken an earlier item.
    to point to, apply to SignPath (what to do then is under "Release").
 4. **Claude without Claude Code: the API-key route.** Kept, but after the
    instant path, because needing a key puts people off. The key lives
-   only in Windows Credential Manager.
+   only in Windows Credential Manager. *Replaced on 2026-11-23 by item 3
+   of the roadmap above.*
 5. **Follow-up context between problems.** Optional. Nothing about it is
    written to disk.
 6. **Memory of preferences**, as designed under "Memory".
 
 **Version 1.0** (proposed 2026-11-22, not yet confirmed by the user): the
 first signed release with items 1 and 2 done. "After v1" elsewhere in this
-file means items 5 and 6.
+file means items 5 and 6. The revision of 2026-11-23 did not take this up
+again.
 
 ### The first roadmap (2026-11-19): built
 
 Written after reviewing the app as an engineering technician would use
 it. Its items 1 to 5 are built; what was left of them is in the roadmap
-above. The findings that drove it:
+of 2026-11-22 above, which is the one "the roadmap above" means in this
+section. The findings that drove it:
 
 - The everyday value is the instant path, which needs no setup and already
   beats a desktop or handheld calculator. The AI is used a few times a day,

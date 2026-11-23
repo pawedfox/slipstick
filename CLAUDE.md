@@ -18,24 +18,36 @@ do not quietly change the spec or work around it.
 ## Current state
 
 Version 0.11.0, the current release (2026-11-22). Work follows
-the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-22:
+the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
+when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
+- The mission now is a free, open calculator for every desktop operating
+  system that does not depend on one company's AI. The app has not caught
+  up: it runs on Windows only and asks Claude through Claude Code only.
+- The engine comes first: the app should do as much as it can with no
+  model, so that asking one is a last resort. Models that run on the
+  user's own machine are dropped as an aim.
+- Next is item 1 of the roadmap: hardening the engine, in the slices under
+  "Hardening the engine" in `SPEC.md`. Then macOS, then one small
+  provider-neutral route, then Linux, then a formula library. What was
+  found is under "Models other than Claude" and "Other operating systems"
+  there.
 - The first roadmap is built: the instant path, session history, a
   movable window, the system theme, the installer, Claude through the
   user's Claude Code, pasted pictures, the settings screen, the error
   states, the content security policy and the README.
-- Item 2 of the revised roadmap, widening the instant path, is built:
+- Widening the instant path (item 2 of the 2026-11-22 roadmap) is built:
   decibels and temperature sums (0.10.0), conversions between rpm and Hz
   (0.10.1) and complex numbers (0.11.0). All are for typed input only:
   the language Claude writes formulas in has no temperature or decibel
   units, no complex numbers, and does not convert between rpm and Hz.
-  Next is item 3, getting it used.
 - A complex answer carries `angle` and `parts` beside the number and
   unit (`Answer` in `calc.rs`, `Value` in `main.ts`). The window puts the
   angle on the big line and the parts on a line beneath.
 - The installer is unsigned. The application for signing is held until
   there is use to show; see "Release" in `SPEC.md`.
-- The API-key route is not built. It is item 4.
+- The provider-neutral route is not built. It replaces the API-key route
+  and is item 3.
 - See "Release" in `SPEC.md` for how a release is made. Never change the
   repository's visibility, publish a release or push a tag without being
   asked.
@@ -82,7 +94,8 @@ Already in the repo: `tests/reference/` (the reference problems; edit
 - Claude API over raw HTTPS from Rust. There is no official Anthropic Rust
   SDK, so do not invent one or guess its API. Check request shapes against
   the live Anthropic docs before writing or changing API code.
-- Windows first.
+- Windows first. macOS and Linux are on the roadmap; nothing is built for
+  them.
 
 ## Commands
 
@@ -206,7 +219,8 @@ Say plainly which behaviours were not checked.
 2. **Nothing new goes to disk.** Only settings and the memory notes file are
    written. No history, no logs of problems or answers, no caches of
    responses, no telemetry.
-3. **The API key lives only in Windows Credential Manager.** Never in a file,
+3. **A key lives only in the operating system's credential store** (Windows
+   Credential Manager on Windows). Never in a file,
    an environment file committed to the repo, a log line or an error message.
 4. **Never silently correct or silently learn.** Corrections follow the
    correction setting; memory notes are added only after the user clicks to
