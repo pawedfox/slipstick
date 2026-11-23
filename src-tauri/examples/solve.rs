@@ -12,8 +12,10 @@
 //! Claude's own replies are printed too, to see why one could not be used.
 //!
 //! With `--instant`, reads typed input instead and prints the instant path's
-//! answer, or `null` if it has none. With `--instructions`, prints the
-//! instructions given to Claude.
+//! answer, or `null` if it has none. With `--why`, reads typed input and
+//! prints the reason the instant path gives for refusing it, or `null` if
+//! it gives none. With `--instructions`, prints the instructions given to
+//! Claude.
 //!
 //! `--figures N` shows answers to N significant figures (3 to 6), and
 //! `--deeper` asks the slower model, as the two settings do in the app.
@@ -50,6 +52,11 @@ fn run() {
             found
         });
         println!("{}", serde_json::to_string(&found).expect("could not write JSON"));
+        return;
+    }
+
+    if std::env::args().any(|arg| arg == "--why") {
+        println!("{}", serde_json::to_string(&calc::why_not(&reply)).expect("could not write JSON"));
         return;
     }
 

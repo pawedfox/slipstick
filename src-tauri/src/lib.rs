@@ -383,6 +383,13 @@ fn evaluate(state: tauri::State<'_, AppState>, input: String) -> Option<calc::An
     calc::with_sig_figs(state.figures(), || calc::evaluate(&input))
 }
 
+/// Why the instant path has no answer for this input, in one plain line,
+/// where the reason is certain. Asked for when Enter is pressed.
+#[tauri::command]
+fn explain(input: String) -> Option<String> {
+    calc::why_not(&input)
+}
+
 /// Looks for the user's Claude Code, unless it has been found already.
 /// Finding it does not use it: that waits until they agree.
 fn look_for_claude(app: &AppHandle) {
@@ -671,6 +678,7 @@ pub fn run() {
             set_visible_height,
             hide_window,
             evaluate,
+            explain,
             claude_status,
             connect_claude,
             warm_claude,

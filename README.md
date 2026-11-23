@@ -14,8 +14,9 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.11.0. It is one person's tool, in daily use by its
-author; expect rough edges. See
+Status: version 0.12.0, not yet released (the latest release is 0.11.0,
+which does not yet say why it refused an input). It is one person's tool,
+in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
@@ -85,12 +86,25 @@ It understands:
 - **A name in front**, as you would write it on paper: `VGS = …`.
 
 It is strict on purpose. Anything it is not sure of gets no instant answer,
-never a guess. Click the answer, or press Ctrl+C with nothing selected, to
-copy the plain number. The up and down arrows recall earlier inputs.
+never a guess. Press **Enter** on something it refused and, where it knows
+exactly why, it says so:
+
+| You type, then Enter | It says |
+|---|---|
+| `5V + 3mA` | A voltage and a current cannot be added. |
+| `3.5 bar to V` | A pressure cannot be converted to a voltage. |
+| `25 C + 30 C` | Two temperatures cannot be added. One less the other is a difference. |
+| `ln(5V)` | ln needs a plain number. Divide by a unit first. |
+| `1/2pi` | What follows the division could be above or below the line. Add brackets, as in 1/(2*pi). |
+| `V = 2.2mA * 4.7k` | 4.7k has a prefix but no unit. |
+
+Click the answer, or press Ctrl+C with nothing selected, to copy the plain
+number. The up and down arrows recall earlier inputs.
 
 ### Harder problems, with Claude (optional)
 
-Press **Enter** on something that is not plain math:
+Press **Enter** on something that is not plain math. (If Enter gave a
+reason for refusing it, press Enter again to send it all the same.)
 
 <img src="docs/steps.png" width="444" alt="A loaded voltage divider described in words, answered as 2.512 V, with the formula used under the answer and the two steps of working shown above it">
 

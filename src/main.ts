@@ -160,6 +160,9 @@ const state = {
   message: null as string | null,
   /** The message is an offer to connect Claude, with a button. */
   offer: false,
+  /** The input whose refusal the message explains. Enter on it again sends
+   *  it to Claude after all. */
+  explained: null as string | null,
   /** The settings. These are the defaults until the Rust side has answered. */
   settings: {
     hotkey: "Ctrl+Alt+C",
@@ -849,6 +852,7 @@ async function applyInstantAnswer() {
 
   state.message = null;
   state.offer = false;
+  state.explained = null;
   if (result) {
     state.shown = result;
     state.stale = false;
@@ -1019,6 +1023,20 @@ async function submit() {
     // Already being asked, or already answered.
   } else if (state.offer) {
     void connect(); // Enter accepts the offer
+  } else if (!state.pictures.length && state.explained !== text) {
+    // The instant path refused it. If it knows why, say so first; Enter
+    // again on the same text sends it to Claude after all.
+    const reason = await invoke<string | null>("explain", { input: text });
+    if (input.value.trim() !== text) return; // the box has changed meanwhile
+    if (!reason) {
+      void needsClaude(text);
+      return;
+    }
+    state.explained = text;
+    state.shown = null;
+    state.stale = false;
+    state.message = reason;
+    void update();
   } else {
     void needsClaude(text);
   }

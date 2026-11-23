@@ -48,6 +48,7 @@ export function installDevBridge() {
     set_visible_height: () => null,
     hide_window: () => null,
     evaluate: (args) => post("/evaluate", { input: args.input, figures: settings.figures }),
+    explain: (args) => post("/explain", { input: args.input }),
     claude_status: () => ({ found: true, connected }),
     connect_claude: () => {
       connected = true;

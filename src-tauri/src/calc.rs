@@ -607,6 +607,10 @@ struct Parser<'a> {
     k_rate: bool,
     /// The input has a π in it.
     saw_pi: bool,
+    /// Why the parse stopped, where that is known for certain. See `Why`.
+    why: Option<Why>,
+    /// The first value typed with a prefix and no unit, as typed: `4.7k`.
+    bare_text: Option<String>,
 }
 
 /// The deepest nesting the parser will follow: about a hundred brackets
@@ -646,6 +650,70 @@ impl<'a> Parser<'a> {
             fahrenheit: false,
             k_rate: false,
             saw_pi: false,
+            why: None,
+            bare_text: None,
+        }
+    }
+
+    /// Refuses, noting why. Only the first reason is kept: nothing is tried
+    /// again after a refusal, so it is the one that stopped the parse.
+    fn refuse<T>(&mut self, why: Why) -> Option<T> {
+        self.why.get_or_insert(why);
+        None
+    }
+
+    /// A closing bracket was expected. If the input simply ran out, that is
+    /// the reason; if something else is there, the reason is not known.
+    fn unclosed<T>(&mut self) -> Option<T> {
+        if self.peek().is_none() { self.refuse(Why::Unclosed) } else { None }
+    }
+
+    fn times(&mut self, a: Quantity, b: Quantity) -> Option<Quantity> {
+        multiply(a, b).or_else(|| self.refuse(Why::TemperatureScaled))
+    }
+
+    fn over(&mut self, a: Quantity, b: Quantity) -> Option<Quantity> {
+        divide(a, b).or_else(|| {
+            let scaled = a.reading.is_some() || b.reading.is_some();
+            self.refuse(if scaled { Why::TemperatureScaled } else { Why::DividedByZero })
+        })
+    }
+
+    fn to_power(&mut self, base: Quantity, exponent: Quantity) -> Option<Quantity> {
+        raise(base, exponent).or_else(|| {
+            if base.reading.is_some() {
+                self.refuse(Why::TemperatureScaled)
+            } else if exponent.dim != NO_DIM {
+                self.refuse(Why::PowerWithUnit)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// The square root. A negative number has none among the real numbers,
+    /// and working it out regardless would give no answer and no reason.
+    fn root(&mut self, operand: Quantity) -> Option<Quantity> {
+        if operand.im == 0.0 && operand.value < 0.0 && operand.reading.is_none() {
+            return self.refuse(Why::OutOfRange("sqrt".into()));
+        }
+        self.to_power(operand, Quantity::plain(0.5))
+    }
+
+    /// Puts `argument` through the function `name`.
+    fn call(&mut self, name: &str, argument: Quantity) -> Option<Quantity> {
+        if name == "sqrt" {
+            return self.root(argument);
+        }
+        match apply(name, argument) {
+            Some(result) if !result.value.is_finite() && matches!(name, "asin" | "acos" | "ln" | "log") => {
+                self.refuse(Why::OutOfRange(name.into()))
+            }
+            Some(result) => Some(result),
+            None => match why_not_applied(name, argument) {
+                Some(why) => self.refuse(why),
+                None => None,
+            },
         }
     }
 
@@ -749,7 +817,13 @@ impl<'a> Parser<'a> {
                 return Some(left);
             };
             let right = self.parallel()?;
-            left = add(left, right, sign)?;
+            left = match add(left, right, sign) {
+                Some(total) => total,
+                None => match why_not_added(left, right, sign) {
+                    Some(why) => return self.refuse(why),
+                    None => return None,
+                },
+            };
         }
     }
 
@@ -758,8 +832,11 @@ impl<'a> Parser<'a> {
         let mut left = self.product()?;
         while self.take(Token::Parallel) {
             let right = self.product()?;
-            if left.dim != right.dim || left.reading.is_some() || right.reading.is_some() {
-                return None;
+            if left.dim != right.dim {
+                return self.refuse(Why::Unlike { left: left.dim, right: right.dim, how: Joined::Parallel });
+            }
+            if left.reading.is_some() || right.reading.is_some() {
+                return self.refuse(Why::TemperatureScaled);
             }
             // The product over the sum, which holds for complex values too.
             let sum = Quantity::complex(left.value + right.value, left.im + right.im, left.dim);
@@ -773,10 +850,12 @@ impl<'a> Parser<'a> {
         let mut after_division = false;
         loop {
             if self.take(Token::Star) {
-                left = multiply(left, self.unary()?)?;
+                let right = self.unary()?;
+                left = self.times(left, right)?;
                 after_division = false;
             } else if self.take(Token::Slash) {
-                left = divide(left, self.unary()?)?;
+                let right = self.unary()?;
+                left = self.over(left, right)?;
                 after_division = true;
             } else if matches!(
                 self.peek(),
@@ -785,10 +864,11 @@ impl<'a> Parser<'a> {
                 // Implied multiplication, as in `2pi` or `2(3)`. After a
                 // division it is ambiguous (`1/2pi`), so it is refused.
                 if after_division {
-                    return None;
+                    return self.refuse(Why::AfterDivision);
                 }
                 self.interesting = true;
-                left = multiply(left, self.power()?)?;
+                let right = self.power()?;
+                left = self.times(left, right)?;
             } else {
                 return Some(left);
             }
@@ -827,11 +907,11 @@ impl<'a> Parser<'a> {
         if let Some(&Token::Super(n)) = self.peek() {
             self.pos += 1;
             self.interesting = true;
-            base = raise(base, Quantity::plain(f64::from(n)))?;
+            base = self.to_power(base, Quantity::plain(f64::from(n)))?;
         }
         if self.take(Token::Caret) {
             let exponent = self.unary()?;
-            raise(base, exponent)
+            self.to_power(base, exponent)
         } else {
             Some(base)
         }
@@ -852,7 +932,11 @@ impl<'a> Parser<'a> {
             self.take(Token::Plus);
         }
         let angle = self.primary()?;
-        if angle.dim != ANGLE_DIM || angle.im != 0.0 || size.im != 0.0 || size.reading.is_some() || size.percent {
+        let ordinary = angle.im == 0.0 && size.im == 0.0 && size.reading.is_none() && !size.percent;
+        if ordinary && angle.dim == NO_DIM && !angle.percent {
+            return self.refuse(Why::AngleNeedsUnit);
+        }
+        if angle.dim != ANGLE_DIM || !ordinary {
             return None;
         }
         let turn = if negative { -angle.value } else { angle.value };
@@ -932,7 +1016,8 @@ impl<'a> Parser<'a> {
     }
 
     fn operand(&mut self) -> Option<Quantity> {
-        let token = self.peek()?.clone();
+        // Something was expected here and the input has run out.
+        let Some(token) = self.peek().cloned() else { return self.refuse(Why::Unfinished) };
         self.pos += 1;
         match token {
             Token::Number(value) => {
@@ -950,6 +1035,9 @@ impl<'a> Parser<'a> {
                     self.pos += 1;
                     self.k_rate |= word == "K" && self.at_rate();
                     self.interesting = true;
+                    if dim == NO_DIM && self.bare_text.is_none() {
+                        self.bare_text = Some(format!("{value}{word}"));
+                    }
                     let (scale, dim) = self.finish_unit(scale, dim, index);
                     return Some(Quantity::of(value * scale, dim));
                 }
@@ -962,12 +1050,12 @@ impl<'a> Parser<'a> {
             }
             Token::Open => {
                 let inner = self.sum()?;
-                self.take(Token::Close).then_some(inner)
+                if self.take(Token::Close) { Some(inner) } else { self.unclosed() }
             }
             Token::Root => {
                 self.interesting = true;
                 let operand = self.primary()?;
-                raise(operand, Quantity::plain(0.5))
+                self.root(operand)
             }
             Token::Word(word) => {
                 self.interesting = true;
@@ -1000,13 +1088,13 @@ impl<'a> Parser<'a> {
                     }
                     let argument = self.sum()?;
                     if !self.take(Token::Close) {
-                        return None;
+                        return self.unclosed();
                     }
                     // An angle found this way is shown in degrees.
                     if matches!(word.as_str(), "arg" | "phase") {
                         self.typed.push((unit_index("deg")?, 1));
                     }
-                    return apply(&word, argument);
+                    return self.call(&word, argument);
                 }
                 // A temperature word on its own is one degree of difference,
                 // as in `8 mW/C`.
@@ -1746,6 +1834,281 @@ struct Outcome {
     scale_typed: bool,
     /// A lone `K` came straight before a `/` and a unit.
     k_rate: bool,
+    /// The first value typed with a prefix and no unit, as typed.
+    bare_text: Option<String>,
+}
+
+// ---- why an input was refused -----------------------------------------------
+//
+// The evaluator returns nothing when it is unsure, and that does not change.
+// Where it knows exactly why it could not answer, it can also say so
+// (`why_not`). It never offers a number with the reason, and it says nothing
+// unless every reading it tried was refused for the same reason.
+
+/// How two quantities were being combined.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Joined {
+    Added,
+    Subtracted,
+    Parallel,
+}
+
+/// A reason for refusing typed input that is known for certain.
+#[derive(Clone, Debug, PartialEq)]
+enum Why {
+    /// Two different kinds of quantity were combined: `5V + 3mA`.
+    Unlike { left: Dim, right: Dim, how: Joined },
+    /// `25 C + 30 C`.
+    TwoTemperatures,
+    /// `10 K - 25 C`.
+    TemperatureFromDifference,
+    /// A temperature on a scale was multiplied, divided, raised to a power
+    /// or put through a function: `2 * 25 C`.
+    TemperatureScaled,
+    DividedByZero,
+    /// A function that takes a plain number was given one with a unit.
+    NeedsPlain(String),
+    /// `sin(3 V)`.
+    NeedsAngle(String),
+    /// `asin(2)`, `ln(0)`, `sqrt(-4)`.
+    OutOfRange(String),
+    /// `2 ^ 3V`.
+    PowerWithUnit,
+    /// `1/2pi`: above the line or below it?
+    AfterDivision,
+    /// `230 V @ 120`.
+    AngleNeedsUnit,
+    /// The input ends where a value was expected: `4.7k *`.
+    Unfinished,
+    Unclosed,
+    Unopened,
+    /// `3.5 bar to V`.
+    CannotConvert { from: Dim, to: Dim },
+    /// `1/(20 ms) to rpm`: cycles or radians?
+    PerSecond,
+    BelowZero,
+    /// A named answer with a value that has a prefix and no unit:
+    /// `V = 2.2mA * 4.7k`.
+    NoUnit(String),
+    /// A lone `m` that could be milli or metres: `2m + 3m`.
+    LoneM,
+    /// `47 in dB`: power or voltage?
+    BareDecibel,
+}
+
+/// What a quantity with these dimensions is called, with its article.
+fn kind(dim: Dim) -> Option<&'static str> {
+    const KINDS: &[(Dim, &str)] = &[
+        (NO_DIM, "a plain number"),
+        (VOLTAGE, "a voltage"),
+        (CURRENT, "a current"),
+        (RESISTANCE, "a resistance"),
+        (CONDUCTANCE, "a conductance"),
+        (CAPACITANCE, "a capacitance"),
+        (INDUCTANCE, "an inductance"),
+        (POWER, "a power"),
+        // Newton metres and joules have the same dimensions.
+        (ENERGY, "an energy or torque"),
+        (CHARGE, "a charge"),
+        (FREQUENCY, "a frequency"),
+        (TIME, "a time"),
+        (LENGTH, "a length"),
+        (AREA, "an area"),
+        (VOLUME, "a volume"),
+        (MASS, "a mass"),
+        (SPEED, "a speed"),
+        (ACCELERATION, "an acceleration"),
+        (FLOW, "a flow"),
+        (FORCE, "a force"),
+        (PRESSURE, "a pressure"),
+        (MAGNETIC_FLUX, "a magnetic flux"),
+        (FLUX_DENSITY, "a flux density"),
+        (ANGLE_DIM, "an angle"),
+        (ANGULAR_SPEED, "a rotation speed"),
+        (TEMPERATURE, "a temperature"),
+        (THERMAL_RESISTANCE, "a thermal resistance"),
+    ];
+    KINDS.iter().find(|(known, _)| *known == dim).map(|(_, name)| *name)
+}
+
+fn capital(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+impl Why {
+    /// The reason as one plain line for the window.
+    fn say(&self) -> String {
+        match self {
+            Why::Unlike { left, right, how } => match (kind(*left), kind(*right), how) {
+                (Some(a), Some(b), Joined::Added) => format!("{} and {b} cannot be added.", capital(a)),
+                (Some(a), Some(b), Joined::Subtracted) => format!("{} cannot be subtracted from {a}.", capital(b)),
+                (Some(a), Some(b), Joined::Parallel) => format!("{} and {b} cannot be put in parallel.", capital(a)),
+                (_, _, Joined::Added) => "Those are different kinds of quantity, so they cannot be added.".into(),
+                (_, _, Joined::Subtracted) => {
+                    "Those are different kinds of quantity, so one cannot be subtracted from the other.".into()
+                }
+                (_, _, Joined::Parallel) => {
+                    "Those are different kinds of quantity, so they cannot be put in parallel.".into()
+                }
+            },
+            Why::TwoTemperatures => "Two temperatures cannot be added. One less the other is a difference.".into(),
+            Why::TemperatureFromDifference => "A temperature cannot be subtracted from a difference.".into(),
+            Why::TemperatureScaled => {
+                "A temperature cannot be multiplied or divided. A difference in K can.".into()
+            }
+            Why::DividedByZero => "That divides by zero.".into(),
+            Why::NeedsPlain(name) => format!("{name} needs a plain number. Divide by a unit first."),
+            Why::NeedsAngle(name) => format!("{name} needs an angle or a plain number."),
+            Why::OutOfRange(name) => match name.as_str() {
+                "asin" | "acos" => format!("{name} needs a number from −1 to 1."),
+                "ln" | "log" => format!("{name} needs a number above zero."),
+                _ => "A negative number has no real square root.".into(),
+            },
+            Why::PowerWithUnit => "A power must be a plain number.".into(),
+            Why::AfterDivision => {
+                "What follows the division could be above or below the line. Add brackets, as in 1/(2*pi).".into()
+            }
+            Why::AngleNeedsUnit => "The angle needs a unit: deg or rad.".into(),
+            Why::Unfinished => "The expression is not finished.".into(),
+            Why::Unclosed => "A bracket is not closed.".into(),
+            Why::Unopened => "A closing bracket has no opening one.".into(),
+            Why::CannotConvert { from, to } => match (kind(*from), kind(*to)) {
+                (Some(a), Some(b)) => format!("{} cannot be converted to {b}.", capital(a)),
+                _ => "That cannot be converted to the unit asked for.".into(),
+            },
+            Why::PerSecond => {
+                "A per-second value could be cycles or radians. Type it in Hz to convert it to a rotation speed."
+                    .into()
+            }
+            Why::BelowZero => "That is below absolute zero.".into(),
+            Why::NoUnit(text) => format!("{text} has a prefix but no unit."),
+            Why::LoneM => "A lone m could be milli or metres here. Give it a unit, as in mA.".into(),
+            Why::BareDecibel => {
+                "A plain number in dB could be a power or a voltage ratio. Give both sides units, as in 2V / 1V to dB."
+                    .into()
+            }
+        }
+    }
+}
+
+/// Why `add` refused, where that is known.
+fn why_not_added(left: Quantity, right: Quantity, sign: f64) -> Option<Why> {
+    if left.percent || right.percent {
+        return None;
+    }
+    if left.dim != right.dim {
+        let how = if sign > 0.0 { Joined::Added } else { Joined::Subtracted };
+        return Some(Why::Unlike { left: left.dim, right: right.dim, how });
+    }
+    match (left.reading, right.reading) {
+        (Some(_), Some(_)) if sign > 0.0 => Some(Why::TwoTemperatures),
+        (None, Some(_)) if sign < 0.0 => Some(Why::TemperatureFromDifference),
+        _ => None,
+    }
+}
+
+/// Why `apply` refused, where that is known.
+fn why_not_applied(name: &str, argument: Quantity) -> Option<Why> {
+    if argument.reading.is_some() {
+        return Some(Why::TemperatureScaled);
+    }
+    if argument.im != 0.0 || argument.dim == NO_DIM {
+        return None;
+    }
+    match name {
+        "sin" | "cos" | "tan" => Some(Why::NeedsAngle(name.into())),
+        "ln" | "log" | "exp" | "asin" | "acos" | "atan" => Some(Why::NeedsPlain(name.into())),
+        _ => None,
+    }
+}
+
+/// Whether every word in the input is one the engine knows: a unit, a
+/// prefix, a function, a constant, `to` or `in`. If not, the input is in
+/// words, which is a problem for a model and not a slip in the maths, and
+/// no reason is given for refusing it.
+fn all_maths(tokens: &[Token]) -> bool {
+    tokens.iter().all(|token| match token {
+        Token::Word(word) => {
+            matches!(word.as_str(), "pi" | "π" | "e" | "j" | "to" | "in")
+                || is_function(word)
+                || is_complex_function(word)
+                || lookup(word).is_some()
+                || temperature_scale(word).is_some()
+                || level(word).is_some()
+                || is_gain(word)
+        }
+        Token::Name(_) => false,
+        _ => true,
+    })
+}
+
+/// `47 in dB`: a plain number asked for in decibels.
+fn bare_decibel(tokens: &[Token], labelled: bool) -> bool {
+    let [expression @ .., Token::Word(keyword), Token::Word(unit)] = tokens else { return false };
+    if (keyword != "to" && keyword != "in") || !is_gain(unit) || ratio_split(expression).is_some() {
+        return false;
+    }
+    let plain = |quantity: Quantity| quantity.dim == NO_DIM && quantity.im == 0.0 && quantity.value > 0.0;
+    matches!(expression, [Token::Number(value)] if *value > 0.0)
+        || reading(expression, None, labelled).is_some_and(|outcome| plain(outcome.quantity))
+}
+
+/// Why one reading of a lone `K` was refused. Follows `reading_with`.
+fn why_reading(tokens: &[Token], split: Option<usize>, labelled: bool, kelvin: bool) -> Option<Why> {
+    let no_unit = |outcome: Outcome| {
+        (labelled && outcome.bare_prefix).then(|| Why::NoUnit(outcome.bare_text.unwrap_or_default()))
+    };
+
+    let mut why_milli = None;
+    let milli = attempt_noting(tokens, split, BareM::Milli, kelvin, &[], &mut why_milli);
+    let saw_bare_m = milli.as_ref().is_none_or(|outcome| outcome.saw_bare_m);
+    if !saw_bare_m {
+        return milli.and_then(no_unit);
+    }
+    let mut why_metre = None;
+    let metre = attempt_noting(tokens, split, BareM::Metre, kelvin, &[], &mut why_metre);
+
+    match (milli, metre) {
+        (Some(only), None) | (None, Some(only)) => no_unit(only),
+        // Both ways of reading a lone `m` must fail for the same reason.
+        (None, None) => why_milli.filter(|why| Some(why) == why_metre.as_ref()),
+        (Some(milli), Some(metre)) => match (milli.electrical, milli.mechanical) {
+            (true, false) => no_unit(milli),
+            (false, true) => no_unit(metre),
+            _ => Some(Why::LoneM),
+        },
+    }
+}
+
+/// Says why typed input got no answer, in one plain line, where the reason
+/// is certain. Returns nothing for input that is answered, for input in
+/// words, and whenever the reason is not known or the readings disagree.
+pub fn why_not(input: &str) -> Option<String> {
+    let text = input.trim().trim_end_matches('=').trim_end();
+    if text.is_empty() || text.chars().count() > 400 || evaluate(input).is_some() {
+        return None;
+    }
+    let (labelled, text) = without_label(text);
+    let tokens = lex(text, &[])?;
+    if tokens.is_empty() || !all_maths(&tokens) {
+        return None;
+    }
+    if bare_decibel(&tokens, labelled) {
+        return Some(Why::BareDecibel.say());
+    }
+    let split = conversion_split(&tokens);
+    let kilo = why_reading(&tokens, split, labelled, false)?;
+    // A lone `K` is read as kilo and as kelvin. Both must agree.
+    if tokens.iter().any(|token| matches!(token, Token::Word(word) if word == "K"))
+        && why_reading(&tokens, split, labelled, true).as_ref() != Some(&kilo)
+    {
+        return None;
+    }
+    Some(kilo.say())
 }
 
 /// `kelvin` reads a lone `K` as kelvin, not as the prefix kilo.
@@ -1755,6 +2118,18 @@ fn attempt(
     bare_m: BareM,
     kelvin: bool,
     names: &[(String, Quantity)],
+) -> Option<Outcome> {
+    attempt_noting(tokens, split, bare_m, kelvin, names, &mut None)
+}
+
+/// As `attempt`. When it refuses and knows why, the reason is left in `why`.
+fn attempt_noting(
+    tokens: &[Token],
+    split: Option<usize>,
+    bare_m: BareM,
+    kelvin: bool,
+    names: &[(String, Quantity)],
+    why: &mut Option<Why>,
 ) -> Option<Outcome> {
     // Typed input must be worth answering: more than a bare number. A step
     // of a program may be as simple as `200` or another step's name.
@@ -1766,8 +2141,18 @@ fn attempt(
 
     let mut parser = Parser::new(expression, bare_m, names);
     parser.kelvin = kelvin;
-    let result = parser.sum()?.settled();
-    if parser.pos != expression.len() || !parser.has_value || !result.value.is_finite() || !result.im.is_finite() {
+    let Some(result) = parser.sum() else {
+        *why = parser.why.take();
+        return None;
+    };
+    let result = result.settled();
+    if parser.pos != expression.len() {
+        if parser.peek() == Some(&Token::Close) {
+            *why = Some(Why::Unopened);
+        }
+        return None;
+    }
+    if !parser.has_value || !result.value.is_finite() || !result.im.is_finite() {
         return None;
     }
     if !in_program && !parser.interesting && wanted.is_none() {
@@ -1786,9 +2171,29 @@ fn attempt(
     };
     let scale_typed = parser.celsius || parser.fahrenheit;
 
+    // Typed input asked for in a unit of another kind. The reason is noted
+    // here; the refusal itself is left to the code below, as before.
+    if let Some(target) = &target
+        && !in_program
+        && result.dim != target.dim
+    {
+        let ordinary = result.im == 0.0 && result.reading.is_none();
+        let in_hertz = typed_in_hertz(&parser, result.dim);
+        if !ordinary || across_angle(result, target, in_hertz).is_none() {
+            *why = Some(if ordinary && result.dim == FREQUENCY && target.dim == ANGULAR_SPEED {
+                Why::PerSecond
+            } else {
+                Why::CannotConvert { from: result.dim, to: target.dim }
+            });
+        }
+    }
+
     let answer = if result.im != 0.0 {
         shown_complex(result, target.as_ref(), parser.joules)?
     } else if result.dim == TEMPERATURE && target.is_none() {
+        if result.kelvin().is_some_and(|kelvin| kelvin < -1e-9) {
+            *why = Some(Why::BelowZero);
+        }
         shown_temperature(result, to_scale, parser.typed_scale(), scale_typed)?
     } else if result.reading.is_some() {
         return None;
@@ -1848,6 +2253,7 @@ fn attempt(
         mechanical: parser.mechanical || target.as_ref().is_some_and(|t| t.mechanical),
         scale_typed,
         k_rate: parser.k_rate,
+        bare_text: parser.bare_text.take(),
     })
 }
 
@@ -2627,6 +3033,141 @@ mod tests {
         // A step may still have a name that typed input uses as a function.
         assert_eq!(run(&[expression("phase", "atan(1) * 1rad")]).unwrap(), ["0.7854 rad"]);
         assert_eq!(run(&[expression("re", "3 ohm"), expression("im", "4 ohm")]).unwrap(), ["3.000 Ω", "4.000 Ω"]);
+    }
+
+    /// Refused, with this reason given.
+    #[track_caller]
+    fn why(input: &str, expected: &str) {
+        assert_eq!(show(input), None, "should not answer {input:?}");
+        assert_eq!(why_not(input).as_deref(), Some(expected), "for {input:?}");
+    }
+
+    /// Refused, with no reason given: it is not known for certain.
+    #[track_caller]
+    fn silent(input: &str) {
+        assert_eq!(show(input), None, "should not answer {input:?}");
+        assert_eq!(why_not(input), None, "should give no reason for {input:?}");
+    }
+
+    #[test]
+    fn says_why_unlike_quantities_cannot_be_combined() {
+        why("5V + 3mA", "A voltage and a current cannot be added.");
+        why("5V + 3", "A voltage and a plain number cannot be added.");
+        why("12V - 2A", "A current cannot be subtracted from a voltage.");
+        why("10kohm || 100nF", "A resistance and a capacitance cannot be put in parallel.");
+        why("1500 rpm + 50 Hz", "A rotation speed and a frequency cannot be added.");
+        why("10 Nm + 5 V", "An energy or torque and a voltage cannot be added.");
+        // The reason is the first thing that went wrong, wherever it is.
+        why("2 * (5V + 3mA) / 4", "A voltage and a current cannot be added.");
+        why("VGS = 5V + 3mA", "A voltage and a current cannot be added.");
+        // Units with no everyday name are not named.
+        why("5 V/s + 3 A", "Those are different kinds of quantity, so they cannot be added.");
+    }
+
+    #[test]
+    fn says_why_a_temperature_was_refused() {
+        why("25 C + 30 C", "Two temperatures cannot be added. One less the other is a difference.");
+        why("25 C + 30", "A temperature and a plain number cannot be added.");
+        why("2 * 25 C", "A temperature cannot be multiplied or divided. A difference in K can.");
+        why("25 C / 2", "A temperature cannot be multiplied or divided. A difference in K can.");
+        why("(25 C)^2", "A temperature cannot be multiplied or divided. A difference in K can.");
+        why("-300 C", "That is below absolute zero.");
+        why("25 C to V", "A temperature cannot be converted to a voltage.");
+        // What is allowed still is.
+        check("25 C + 2 W * 50 C/W", "125.0 °C");
+        check("150 C - 25 C", "125.0 Δ°C");
+    }
+
+    #[test]
+    fn says_why_a_function_or_power_was_refused() {
+        why("ln(5V)", "ln needs a plain number. Divide by a unit first.");
+        why("exp(2 s)", "exp needs a plain number. Divide by a unit first.");
+        why("sin(3 V)", "sin needs an angle or a plain number.");
+        why("asin(2)", "asin needs a number from −1 to 1.");
+        why("ln(0)", "ln needs a number above zero.");
+        why("log(-1)", "log needs a number above zero.");
+        why("sqrt(-4)", "A negative number has no real square root.");
+        why("√(-4)", "A negative number has no real square root.");
+        why("2 ^ 3V", "A power must be a plain number.");
+        why("1/0", "That divides by zero.");
+        why("5V / (2 - 2)", "That divides by zero.");
+        check("sin(30 deg)", "0.5000");
+        check("sqrt(4V * 1V)", "2.000 V");
+    }
+
+    #[test]
+    fn says_why_a_conversion_was_refused() {
+        why("3.5 bar to V", "A pressure cannot be converted to a voltage.");
+        why("25 mm in kg", "A length cannot be converted to a mass.");
+        why("(3+4j) ohm to V", "A resistance cannot be converted to a voltage.");
+        why(
+            "1/(20 ms) to rpm",
+            "A per-second value could be cycles or radians. Type it in Hz to convert it to a rotation speed.",
+        );
+        why("10 Nm * 1500 rpm to V", "That cannot be converted to the unit asked for.");
+        check("50 Hz to rpm", "3000 rpm");
+        check("10 Nm * 1500 rpm to hp", "2.106 hp");
+    }
+
+    #[test]
+    fn says_what_is_missing_or_unclear() {
+        why("4.7k *", "The expression is not finished.");
+        why("(2 + 3", "A bracket is not closed.");
+        why("sin(30 deg", "A bracket is not closed.");
+        why("2 + 3)", "A closing bracket has no opening one.");
+        why("1/2pi", "What follows the division could be above or below the line. Add brackets, as in 1/(2*pi).");
+        why("230 V @ 120", "The angle needs a unit: deg or rad.");
+        why("2m + 3m", "A lone m could be milli or metres here. Give it a unit, as in mA.");
+        why("V = 2.2mA * 4.7k", "4.7k has a prefix but no unit.");
+        why(
+            "47 in dB",
+            "A plain number in dB could be a power or a voltage ratio. Give both sides units, as in 2V / 1V to dB.",
+        );
+    }
+
+    #[test]
+    fn gives_no_reason_unless_it_is_certain() {
+        // Words are a problem for a model, not a slip in the maths, even
+        // where part of the input would have a reason.
+        silent("what is 5V + 3mA");
+        silent("cutoff of an RC lowpass, R = 4.7k, C = 100nF");
+        silent("tau for 1M and 22uF");
+        silent("re = 25mV / Ic, Ic = 2mA");
+        silent("5 furlongs");
+        // Refused on purpose, but not for a reason this covers.
+        silent("3 + 4i");
+        silent("5 dBv in V");
+        silent("10 dBm + 3 dBm");
+        silent("(-8)^(1/3)");
+        silent("5V + 10%");
+        // The two ways of reading it fail differently, so neither is given.
+        silent("5 m + 3 V");
+        silent("10 K - 25 C");
+        silent("100 C - 400 K");
+        silent("");
+    }
+
+    #[test]
+    fn gives_no_reason_for_input_that_is_answered() {
+        for input in [
+            "2.2mA * 4.7kohm",
+            "1/(2*pi*4.7kohm*100nF)",
+            "10k || 22k || 47k",
+            "4k7 + 330",
+            "10 Nm * 1500 rpm to hp",
+            "100 C to F",
+            "(150 C - 25 C) / 62 C/W",
+            "250mW in dBm",
+            "2V / 1V to dB",
+            "10kohm + 1/(j*2*pi*1kHz*100nF)",
+            "230 V @ 0° - 230 V @ 120°",
+            "VGS = -0.3V * (1 - sqrt(0.1mA / 0.2mA))",
+            "2 W * 40 K/W",
+            "25 mm to in",
+        ] {
+            assert!(evaluate(input).is_some(), "should answer {input:?}");
+            assert_eq!(why_not(input), None, "should give no reason for {input:?}");
+        }
     }
 
     #[test]

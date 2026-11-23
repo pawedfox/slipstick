@@ -95,6 +95,10 @@ async function answer(request, response) {
     const asked = JSON.parse(await body(request));
     return send((await solve(['--instant', ...options(asked)], asked.input)) || 'null');
   }
+  if (posted && request.url === '/explain') {
+    const asked = JSON.parse(await body(request));
+    return send((await solve(['--why'], asked.input)) || 'null');
+  }
   if (posted && request.url === '/ask') {
     // The whole request (problem and any image) goes through as JSON.
     const text = await body(request);

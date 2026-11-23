@@ -17,7 +17,8 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.11.0, the current release (2026-11-22). Work follows
+Version 0.12.0, not yet released; 0.11.0 is the current release
+(2026-11-22). Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -27,8 +28,11 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
 - The engine comes first: the app should do as much as it can with no
   model, so that asking one is a last resort. Models that run on the
   user's own machine are dropped as an aim.
-- Next is item 1 of the roadmap: hardening the engine, in the slices under
-  "Hardening the engine" in `SPEC.md`. Then macOS, then one small
+- Item 1 of the roadmap is hardening the engine, in the slices under
+  "Hardening the engine" in `SPEC.md`. The first is built in 0.12.0: on
+  Enter the app says why it refused an input, where it is certain
+  (`why_not` in `calc.rs`; "Saying why" in `SPEC.md`). Next is the second
+  slice, values after a formula. After the engine come macOS, then one small
   provider-neutral route, then Linux, then a formula library. What was
   found is under "Models other than Claude" and "Other operating systems"
   there.
@@ -133,6 +137,12 @@ Run from the repo root unless noted.
   unit, add one line to the `UNITS` table and a test. Check any new name
   against the prefix letters first: a unit called `mil` must not be read as
   milli-something.
+  `why_not` says why typed input was refused, and only where that is
+  certain. To add a reason, add a case to `Why`, record it at the one
+  place the engine stops for that cause (`Parser::refuse`), give it its
+  wording in `Why::say`, and add a test with `why`. An input whose reason
+  is not certain must stay `silent`, and nothing here may change what
+  `evaluate` answers.
 - `src-tauri/src/solver.rs` — runs Claude's reply through the engine and
   produces what the window shows. `src-tauri/prompts/solver.md` is the
   instructions given to Claude; it documents the formula language, so
@@ -183,7 +193,8 @@ way. Use these, in this order of preference:
 
 1. **Unit tests** for the engine and solver: `cargo test --lib`.
 2. **The command-line front** for Claude and the instant path:
-   `solve --ask`, `solve --instant` (see `src-tauri/examples/solve.rs`).
+   `solve --ask`, `solve --instant`, `solve --why` (see
+   `src-tauri/examples/solve.rs`).
    Claude Code started from a session signs in through the desktop app,
    not through the user's own login, so a pass here does not prove the
    installed app can reach Claude. To test sign-in as the installed app

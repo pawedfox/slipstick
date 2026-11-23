@@ -17,8 +17,11 @@ The mission was re-framed on 2026-11-23 (see "Purpose") and the roadmap
 revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
-Next: item 1 of the new roadmap, hardening the engine so that asking a
-model becomes a last resort.
+Item 1 of the new roadmap is hardening the engine, so that asking a model
+becomes a last resort. Its first slice is built in 0.12.0 (2026-11-23,
+not yet released): on Enter, the app says why it refused an input, where
+it knows for certain (see "Saying why" under "Instant path").
+Next: the second slice, values after a formula.
 
 ## Purpose
 
@@ -72,7 +75,9 @@ Unofficial project. Not affiliated with or endorsed by Anthropic.
 1. Summon (global hotkey or taskbar pin). Input is focused.
 2. Type or paste. Plain maths and conversions answer as you type.
 3. For anything else, press Enter to ask Claude (text, or a pasted
-   screenshot).
+   screenshot). If it was plain maths that the engine refused, and the
+   engine knows why, Enter says why first, and Enter again asks Claude
+   (from 0.12.0).
 4. The answer appears large, in engineering notation with units.
 5. Click back into other work. The window stays on top with the answer visible.
 6. Esc hides it to the tray.
@@ -701,6 +706,84 @@ Rules:
 
 Not in the instant path: variables, the decimal comma, and a plain ratio
 in decibels. Those go to Claude.
+
+### Saying why (0.12.0)
+
+The first slice of "Hardening the engine". Until now a refused input
+showed nothing, so a slip and a limit looked the same, and Enter sent
+both to Claude. Decided with the user on 2026-11-23:
+
+- **When.** On Enter only. Nothing changes while typing, so half-typed
+  input such as `5V + 3` never draws a remark.
+- **Where.** The one-line message row the window already has. No new
+  element, and not the yellow strip, which is for flags.
+- **Then Claude.** Enter again on the same text sends it to Claude as
+  before. Some inputs the engine refuses, Claude answers: in
+  `V = 2.2mA * 4.7k` the engine knows only that `4.7k` has no unit.
+  Editing the text clears the reason.
+- **Wording.** By the kind of quantity, not the unit typed: "A voltage and
+  a current cannot be added." A unit with no everyday name gets "Those are
+  different kinds of quantity".
+
+The evaluator is as strict as it was: `why_not` in `calc.rs` is asked only
+after it has refused, and never offers a number. It gives a reason only
+when all of these hold, and otherwise says nothing:
+
+- Every word in the input is one the engine knows (a unit, a prefix, a
+  function, a constant, `to` or `in`). Input with any other word is a
+  problem in words, for a model, and gets no remark even where part of it
+  would have a reason (`what is 5V + 3mA`).
+- The engine stopped at a place where the cause is known. Each such place
+  records one reason (`Why`), and the first is kept.
+- Every reading it tried was refused for the same reason. A lone `m` is
+  read as milli and as metres, and a lone `K` as kilo and as kelvin; if
+  the readings fail differently, neither reason is given (`5 m + 3 V`).
+
+The reasons, with an input that draws each:
+
+| Input | It says |
+|---|---|
+| `5V + 3mA` | A voltage and a current cannot be added. |
+| `12V - 2A` | A current cannot be subtracted from a voltage. |
+| `10kohm \|\| 100nF` | A resistance and a capacitance cannot be put in parallel. |
+| `3.5 bar to V` | A pressure cannot be converted to a voltage. |
+| `1/(20 ms) to rpm` | A per-second value could be cycles or radians. Type it in Hz to convert it to a rotation speed. |
+| `25 C + 30 C` | Two temperatures cannot be added. One less the other is a difference. |
+| `2 * 25 C` | A temperature cannot be multiplied or divided. A difference in K can. |
+| `-300 C` | That is below absolute zero. |
+| `ln(5V)` | ln needs a plain number. Divide by a unit first. |
+| `sin(3 V)` | sin needs an angle or a plain number. |
+| `asin(2)` | asin needs a number from −1 to 1. |
+| `ln(0)` | ln needs a number above zero. |
+| `sqrt(-4)` | A negative number has no real square root. |
+| `2 ^ 3V` | A power must be a plain number. |
+| `1/0` | That divides by zero. |
+| `1/2pi` | What follows the division could be above or below the line. Add brackets, as in 1/(2*pi). |
+| `230 V @ 120` | The angle needs a unit: deg or rad. |
+| `4.7k *` | The expression is not finished. |
+| `(2 + 3` | A bracket is not closed. |
+| `2 + 3)` | A closing bracket has no opening one. |
+| `2m + 3m` | A lone m could be milli or metres here. Give it a unit, as in mA. |
+| `V = 2.2mA * 4.7k` | 4.7k has a prefix but no unit. |
+| `47 in dB` | A plain number in dB could be a power or a voltage ratio. Give both sides units, as in 2V / 1V to dB. |
+
+Refused with no remark, because no reason is recorded for them yet: `i`
+as the imaginary unit, `dBv`, two levels added (`10 dBm + 3 dBm`), a
+percentage added to a quantity, and a root that leaves fractional units.
+
+A program's steps are not explained this way. When one of Claude's steps
+will not run, the app asks Claude again, as before.
+
+Checked for 0.12.0 (2026-11-23): 71 unit tests, of which seven groups are
+new (five of reasons, one of inputs that must get none, and one of inputs
+that are answered and so get none), and the 64 from before pass unchanged;
+every reference problem through the instant path alone, with the same
+three answered; every reference problem asked for a reason, of which two
+get one (`V = 2.2mA * 4.7k` and `5V + 3mA`) and the worded ones none; and
+the window in the built-in browser, where a reason appears on Enter and
+not while typing, goes when the text is edited, a second Enter goes on to
+the Claude offer, words go straight to Claude, and the longest reason
+wraps to two lines. Not checked: the real app.
 
 Checked for 0.11.0 (2026-11-22): 64 unit tests, of which three groups are
 new (complex numbers, magnitude and angle, and that programs have
@@ -1484,8 +1567,9 @@ types.
 **The slices, cheapest first.** One at a time, each with its tests:
 
 1. **Saying why it refused,** where the cause is certain ("volts and amps
-   cannot be added"). Today nothing is shown, so a slip and a limit look
-   the same. It still never guesses a number.
+   cannot be added"). Until now nothing was shown, so a slip and a limit
+   looked the same. It still never guesses a number. *Built 2026-11-23,
+   in 0.12.0: see "Saying why" under "Instant path".*
 2. **Values after a formula:** `gain = Rd * gm, Rd = 10k, gm = 2.1mS`.
 3. **Solving for an unknown:** `10 Hz = 1/(2*pi*1M*C)` gives C. The solver
    exists already, for Claude's working.
