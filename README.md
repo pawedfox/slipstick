@@ -14,10 +14,10 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.13.0, not yet released. The latest release is 0.11.0,
-which does not yet say why it refused an input or take a formula with its
-values after it. It is one person's tool, in daily use by its author;
-expect rough edges. See
+Status: version 0.14.0, not yet released. The latest release is 0.11.0,
+which does not yet say why it refused an input, take a formula with its
+values after it, or solve for a value left out. It is one person's tool,
+in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
@@ -55,6 +55,9 @@ No account and no network. The answer changes with every key.
 | `re = 25mV / Ic, Ic = 2mA` | 12.50 Ω |
 | `F = m * a, m = 5 kg, a = 9.81 m/s^2` | 49.05 N |
 | `E = 0.5 * C * V^2, C = 100uF, V = 12V` | 7.200 mJ |
+| `12V = I * 8ohm` | 1.500 A |
+| `fc = 1/(2*pi*R*C), fc = 10 Hz, R = 1Mohm` | 15.92 nF |
+| `Vth = Vcc * R2 / (R1 + R2), Vth = 1.623V, Vcc = 9V, R1 = 100kohm` | 22.00 kΩ |
 
 It understands:
 
@@ -95,6 +98,14 @@ It understands:
   unit, so `V = 12V` means what it says. Give every value its unit
   (`10kohm`, not `10k`), and write `2*V`, not `2V`. The formula is worked
   out exactly as you typed it, right or wrong.
+- **Solving for the value you left out.** Give every value but one and it
+  finds that one: `V = I * R, V = 12V, I = 1.5A` is 8.000 Ω. It works on
+  equations that cannot be rearranged, too. Where two values fit that
+  differ only in sign, it shows the positive one with the other beneath;
+  where two different values fit, it shows neither and, on Enter, names
+  both. A value it shows always fits the equation, but it searches for
+  answers and can miss one, so "no value was found" does not mean there
+  is none. `x` is the times sign, so call the value something else.
 
 It is strict on purpose. Anything it is not sure of gets no instant answer,
 never a guess. Press **Enter** on something it refused and, where it knows
@@ -110,6 +121,8 @@ exactly why, it says so:
 | `V = 2.2mA * 4.7k` | 4.7k has a prefix but no unit. |
 | `re = 25mV / Ic, Ib = 2mA` | Ic is not given a value. |
 | `tau = RC, R = 1Mohm, C = 22uF` | RC is read as one name. Write it as R*C. |
+| `V = I * R, V = 12V` | Two values are not given: I and R. |
+| `y^2 - 5*y + 6 = 0` | More than one value of y fits: 2.000 and 3.000. |
 
 Click the answer, or press Ctrl+C with nothing selected, to copy the plain
 number. The up and down arrows recall earlier inputs.
@@ -135,9 +148,10 @@ reason for refusing it, press Enter again to send it all the same.)
 
   <img src="docs/flagged.png" width="444" alt="P = V / R with V = 12 V and R = 8 ohm, answered as 1.500 A with a yellow note: Gives amps, not watts. The usual form gives 18.00 W.">
 
-  A formula typed with its values after it is answered at once, exactly
-  as typed, before Claude has seen it. Press Enter on that answer and,
-  with Claude connected, Claude checks it and flags it if it is wrong.
+  A formula typed with its values after it, or an equation with one value
+  left out, is answered at once, exactly as typed, before Claude has seen
+  it. Press Enter on that answer and, with Claude connected, Claude checks
+  it and flags it if it is wrong.
 
 - **Pictures.** Paste a screenshot of a formula, a datasheet row or a small
   schematic, up to four at once, with or without words.

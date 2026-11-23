@@ -1965,11 +1965,25 @@ enum Why {
     /// Values written with nothing between them: `RC`. With it, how to
     /// write them.
     RunTogether(String, String),
+    /// A name that already means something: a function, a constant, or
+    /// `x`, which is the times sign.
+    NameTaken(String),
+    /// An equation in which every value is given.
+    NothingToSolve,
+    /// An equation with two values left to find.
+    TwoNotGiven(String, String),
+    /// No kind of quantity for the value being found lets the two sides
+    /// of the equation be compared.
+    NoKind(String),
+    /// No value was found that makes the two sides equal.
+    NoRoot(String),
+    /// Several values do, and they are not one value with either sign.
+    /// With the name, the values as they would be shown.
+    ManyRoots(String, String),
 }
 
-/// What a quantity with these dimensions is called, with its article.
-fn kind(dim: Dim) -> Option<&'static str> {
-    const KINDS: &[(Dim, &str)] = &[
+/// The kinds of quantity the engine has a name for, each with its article.
+const KINDS: &[(Dim, &str)] = &[
         (NO_DIM, "a plain number"),
         (VOLTAGE, "a voltage"),
         (CURRENT, "a current"),
@@ -1998,7 +2012,10 @@ fn kind(dim: Dim) -> Option<&'static str> {
         (ANGULAR_SPEED, "a rotation speed"),
         (TEMPERATURE, "a temperature"),
         (THERMAL_RESISTANCE, "a thermal resistance"),
-    ];
+];
+
+/// What a quantity with these dimensions is called.
+fn kind(dim: Dim) -> Option<&'static str> {
     KINDS.iter().find(|(known, _)| *known == dim).map(|(_, name)| *name)
 }
 
@@ -2066,6 +2083,15 @@ impl Why {
             Why::NotUsed(name) => format!("{name} is given a value but not used."),
             Why::GivenTwice(name) => format!("{name} is given a value twice."),
             Why::RunTogether(word, apart) => format!("{word} is read as one name. Write it as {apart}."),
+            Why::NameTaken(name) => match name.as_str() {
+                "x" | "X" => format!("{name} is the times sign here, so it cannot name a value. Use another letter."),
+                _ => format!("{name} already means something here, so it cannot name a value."),
+            },
+            Why::NothingToSolve => "Every value is given, so there is nothing to solve for.".into(),
+            Why::TwoNotGiven(first, second) => format!("Two values are not given: {first} and {second}."),
+            Why::NoKind(name) => format!("No kind of quantity for {name} makes the two sides agree."),
+            Why::NoRoot(name) => format!("No value of {name} was found that makes the two sides equal."),
+            Why::ManyRoots(name, values) => format!("More than one value of {name} fits: {values}."),
             Why::UnitOrName(name) => format!(
                 "{name} could be a unit or the value you named {name}. Give the value another name, such as {name}_1."
             ),
@@ -2219,6 +2245,9 @@ fn why_refused(tokens: &[Token], split: Option<usize>, labelled: bool, part: &Pa
 /// Splits typed input at its commas into a formula and the values given
 /// after it. Returns nothing unless every part after the first is a name,
 /// an `=` and something, in which case the input is not of this form.
+///
+/// With no values after it, only an equation counts: something other than
+/// a name to the left of its `=`, as in `12V = I * 8ohm`.
 fn split_given(text: &str) -> Option<(&str, Vec<(&str, &str)>)> {
     let mut parts = Vec::new();
     let (mut depth, mut start) = (0i32, 0);
@@ -2236,8 +2265,16 @@ fn split_given(text: &str) -> Option<(&str, Vec<(&str, &str)>)> {
     parts.push(&text[start..]);
 
     let (formula, rest) = parts.split_first()?;
-    if rest.is_empty() || formula.trim().is_empty() {
+    let formula = formula.trim();
+    if formula.is_empty() {
         return None;
+    }
+    if rest.is_empty() {
+        let (left, right) = formula.split_once('=')?;
+        let (left, right) = (left.trim(), right.trim());
+        if left.is_empty() || right.is_empty() || is_label(left) {
+            return None;
+        }
     }
     let mut values = Vec::new();
     for part in rest {
@@ -2249,7 +2286,7 @@ fn split_given(text: &str) -> Option<(&str, Vec<(&str, &str)>)> {
         }
         values.push((name, value));
     }
-    Some((formula.trim(), values))
+    Some((formula, values))
 }
 
 /// Whether a word is a unit, a prefix or a temperature scale.
@@ -2264,7 +2301,10 @@ fn is_unit_word(word: &str) -> bool {
 /// follows: a `/` or `*` and then a name that is also a unit. In
 /// `100 N/m` with a value named `m`, the `m` could be metres or that
 /// value.
-fn unit_or_name(tokens: &[Token]) -> Option<String> {
+///
+/// `finding` is the value an equation is being solved for, which is not
+/// in doubt: the equation is only tried with it as a value.
+fn unit_or_name(tokens: &[Token], finding: Option<&str>) -> Option<String> {
     let mut in_units = false;
     let mut at = 0;
     while at < tokens.len() {
@@ -2280,7 +2320,9 @@ fn unit_or_name(tokens: &[Token]) -> Option<String> {
                 at += 3;
             }
             (Token::Slash | Token::Star, Some(Token::Word(_))) if in_units => at += 2,
-            (Token::Slash | Token::Star, Some(Token::Name(name))) if in_units && is_unit_word(name) => {
+            (Token::Slash | Token::Star, Some(Token::Name(name)))
+                if in_units && is_unit_word(name) && finding != Some(name.as_str()) =>
+            {
                 return Some(name.clone());
             }
             _ => {
@@ -2292,9 +2334,280 @@ fn unit_or_name(tokens: &[Token]) -> Option<String> {
     None
 }
 
-/// Works out a formula with the values given after it. Returns nothing if
-/// the input is not of that form. Otherwise the answer, or a refusal with
-/// the reason where that is certain.
+/// The first value written with a prefix and no unit, as typed: `4.7k`.
+fn prefix_without_unit(tokens: &[Token]) -> Option<String> {
+    tokens.windows(2).find_map(|pair| match pair {
+        [Token::Number(value), Token::Word(word)] if matches!(lookup(word), Some(Suffix::BarePrefix(_))) => {
+            Some(format!("{value}{word}"))
+        }
+        _ => None,
+    })
+}
+
+/// Names with a digit in them, such as `R2`, which the lexer would
+/// otherwise read as a word and a number. A unit with a power on it
+/// (`mm2`) is not one, and nor is anything straight after a number
+/// (`4k7`).
+fn numbered_names(text: &str) -> Vec<&str> {
+    let chars: Vec<(usize, char)> = text.char_indices().collect();
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at < chars.len() {
+        if !chars[at].1.is_alphabetic() {
+            at += 1;
+            continue;
+        }
+        let start = at;
+        while at < chars.len() && (chars[at].1.is_alphanumeric() || chars[at].1 == '_') {
+            at += 1;
+        }
+        let word = &text[chars[start].0..chars.get(at).map_or(text.len(), |(byte, _)| *byte)];
+        let before = text[..chars[start].0].trim_end().chars().next_back();
+        let after_number = before.is_some_and(|c| c.is_ascii_digit() || c == '.');
+        let Some(digit) = word.find(|c: char| c.is_ascii_digit()) else { continue };
+        let unit_with_power = is_dimensioned_unit(&word[..digit]) && matches!(&word[digit..], "2" | "3");
+        if !after_number && !unit_with_power && !word.contains('_') {
+            found.push(word);
+        }
+    }
+    found
+}
+
+/// Whether the text has an `x` standing by itself, which the engine reads
+/// as a times sign.
+fn has_lone_x(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let part_of_word = |c: Option<&char>| c.is_some_and(|c| c.is_alphanumeric() || *c == '_');
+    (0..chars.len()).any(|at| {
+        matches!(chars[at], 'x' | 'X')
+            && !part_of_word(at.checked_sub(1).and_then(|before| chars.get(before)))
+            && !part_of_word(chars.get(at + 1))
+    })
+}
+
+/// A formula, or an equation, with the values given after it.
+struct Form<'a> {
+    /// Each part as text, with the name it gives a value to. The sides
+    /// come first, with no name: one for a formula, two for an equation.
+    texts: Vec<(&'a str, &'a str)>,
+    /// The values given, as name and text.
+    values: &'a [(&'a str, &'a str)],
+    equation: bool,
+    /// Names with a digit in them, given or not.
+    numbered: Vec<&'a str>,
+}
+
+impl Form<'_> {
+    fn sides(&self) -> usize {
+        if self.equation { 2 } else { 1 }
+    }
+
+    /// Every part as tokens. `finding` is the value an equation is being
+    /// solved for; it is a name wherever it stands alone, even if it is
+    /// also a unit's letter. A value cannot use its own name, which lets
+    /// `V = 12V` be twelve volts.
+    fn lex(&self, finding: Option<&str>) -> Result<Vec<Vec<Token>>, Option<Why>> {
+        self.texts
+            .iter()
+            .map(|(own, text)| {
+                let names: Vec<(String, Quantity)> = self
+                    .values
+                    .iter()
+                    .map(|(name, _)| *name)
+                    .chain(self.numbered.iter().copied())
+                    .chain(finding)
+                    .filter(|name| name != own)
+                    .map(|name| (name.to_string(), Quantity::plain(1.0)))
+                    .collect();
+                let tokens = lex(text, &names).ok_or(None)?;
+                match unit_or_name(&tokens, finding) {
+                    Some(word) => Err(Some(Why::UnitOrName(word))),
+                    None => Ok(tokens),
+                }
+            })
+            .collect()
+    }
+
+    /// Works the form out. For an equation, `finding` is the value to
+    /// find; with none, the equation is only checked for having nothing
+    /// left to find.
+    fn work_out(&self, finding: Option<&str>) -> Result<Outcome, Option<Why>> {
+        let mut parts = self.lex(finding)?;
+        let sides = self.sides();
+
+        // Every value given must be used, or the formula is not the one
+        // meant.
+        let uses =
+            |name: &str| parts.iter().flatten().any(|token| matches!(token, Token::Name(used) if used == name));
+        if let Some((name, _)) = self.values.iter().find(|(name, _)| !uses(name)) {
+            return Err(Some(Why::NotUsed(name.to_string())));
+        }
+        if self.equation {
+            // A conversion has no place in an equation, and a prefix with
+            // no unit is refused as it is for any named answer.
+            if parts[..sides].iter().any(|tokens| conversion_split(tokens).is_some()) {
+                return Err(None);
+            }
+            if let Some(text) = parts[..sides].iter().find_map(|tokens| prefix_without_unit(tokens)) {
+                return Err(Some(Why::NoUnit(text)));
+            }
+        }
+
+        // Whether the work is electrical or mechanical, from the units of
+        // every part. It settles a lone `m` anywhere in the input.
+        let mut flags = Hints::default();
+        for token in parts.iter().flatten() {
+            if let Token::Word(word) = token
+                && let Some(Suffix::Unit { index, .. }) = lookup(word)
+            {
+                match UNITS[index].family {
+                    Electrical => flags.electrical = true,
+                    Mechanical => flags.mechanical = true,
+                    Neutral => {}
+                }
+            }
+        }
+
+        // The values, each as soon as the values it uses are known. Those
+        // that need the value being found wait, and are worked out with
+        // each trial.
+        let mut known: Vec<(String, Quantity)> = Vec::new();
+        let mut carried = flags.clone();
+        let mut waiting: Vec<(&str, Vec<Token>)> =
+            self.values.iter().map(|(name, _)| *name).zip(parts.split_off(sides)).collect();
+        let ready = |tokens: &[Token], known: &[(String, Quantity)]| {
+            tokens.iter().all(|token| match token {
+                Token::Name(name) => known.iter().any(|(have, _)| have == name),
+                _ => true,
+            })
+        };
+        while let Some(at) = waiting.iter().position(|(_, tokens)| ready(tokens, &known)) {
+            let (name, tokens) = waiting.remove(at);
+            // A value is named, so a prefix with no unit is refused, as it
+            // is for any named answer.
+            let part = Part { names: &known, hints: &flags, value_only: true };
+            let outcome = reading_named(&tokens, None, true, &part)
+                .ok_or_else(|| why_refused(&tokens, None, true, &part))?;
+            // A percentage does not keep its meaning as a bare value.
+            if outcome.raw.percent {
+                return Err(None);
+            }
+            carried.add(&outcome.hints);
+            known.push((name.to_string(), outcome.raw));
+        }
+
+        if !self.equation {
+            // Values still waiting depend on one another in a ring.
+            if !waiting.is_empty() {
+                return Err(None);
+            }
+            let split = conversion_split(&parts[0]);
+            let part = Part { names: &known, hints: &carried, value_only: false };
+            return reading_named(&parts[0], split, true, &part)
+                .ok_or_else(|| why_refused(&parts[0], split, true, &part));
+        }
+
+        // An equation. `apart` says how far its two sides are from equal
+        // with these names, and how large they are.
+        let apart = |mut names: Vec<(String, Quantity)>| -> Option<(f64, f64, Hints)> {
+            let mut hints = carried.clone();
+            let mut to_do: Vec<&(&str, Vec<Token>)> = waiting.iter().collect();
+            while let Some(at) = to_do.iter().position(|(_, tokens)| ready(tokens, &names)) {
+                let (name, tokens) = to_do.remove(at);
+                let part = Part { names: &names, hints: &flags, value_only: true };
+                let outcome = reading_named(tokens, None, true, &part)?;
+                if outcome.raw.percent {
+                    return None;
+                }
+                hints.add(&outcome.hints);
+                names.push((name.to_string(), outcome.raw));
+            }
+            if !to_do.is_empty() {
+                return None;
+            }
+            let mut side = |tokens: &[Token]| {
+                let part = Part { names: &names, hints: &flags, value_only: true };
+                let outcome = reading_named(tokens, None, true, &part)?;
+                hints.add(&outcome.hints);
+                Some(outcome.raw)
+            };
+            let (left, right) = (side(&parts[0])?, side(&parts[1])?);
+            let comparable = left.dim == right.dim
+                && left.reading.is_some() == right.reading.is_some()
+                && left.im == 0.0
+                && right.im == 0.0
+                && !left.percent
+                && !right.percent;
+            if !comparable {
+                return None;
+            }
+            let (left, right) = (left.kelvin().unwrap_or(left.value), right.kelvin().unwrap_or(right.value));
+            let gap = left - right;
+            gap.is_finite().then(|| (gap, left.abs().max(right.abs()), hints))
+        };
+
+        let Some(finding) = finding else {
+            // Nothing is being found. If the two sides can be compared as
+            // they stand, every value was given.
+            return Err(apart(known.clone()).map(|_| Why::NothingToSolve));
+        };
+        let with = |x: Quantity| {
+            let mut names = known.clone();
+            names.push((finding.to_string(), x));
+            apart(names)
+        };
+
+        // What kind of quantity is being found: the one kind for which the
+        // two sides can be compared at all.
+        const TRIALS: [f64; 7] = [1.0, 2.0, 0.5, 1e-3, 1e3, 1e-6, 1e6];
+        let mut kinds = KINDS
+            .iter()
+            .map(|(dim, _)| *dim)
+            .filter(|dim| TRIALS.iter().any(|&x| with(Quantity::of(x, *dim)).is_some()));
+        let Some(dim) = kinds.next() else {
+            return Err(Some(Why::NoKind(finding.to_string())));
+        };
+        if kinds.next().is_some() {
+            return Err(None);
+        }
+
+        let roots = roots_of(|x| with(Quantity::of(x, dim)).map(|(gap, size, _)| (gap, size)));
+        let shown = |value: f64| -> Option<Outcome> {
+            let root = Quantity::of(value, dim);
+            let hints = with(root)?.2;
+            let names = [(finding.to_string(), root)];
+            let part = Part { names: &names, hints: &hints, value_only: false };
+            reading_named(&[Token::Name(finding.to_string())], None, false, &part)
+        };
+        let spoken = |value: f64| {
+            shown(value)
+                .map(|outcome| format!("{} {}", outcome.answer.number, outcome.answer.unit).trim_end().to_string())
+        };
+        match roots[..] {
+            [] => Err(Some(Why::NoRoot(finding.to_string()))),
+            [only] => shown(only).ok_or(None),
+            // The same size with opposite signs: the positive one, with
+            // the other on the line beneath.
+            [a, b] if (a + b).abs() <= 1e-9 * a.abs().max(b.abs()) => {
+                let (positive, negative) = if a > 0.0 { (a, b) } else { (b, a) };
+                let mut outcome = shown(positive).ok_or(None)?;
+                outcome.answer.parts = Some(format!("or {}", spoken(negative).ok_or(None)?));
+                Ok(outcome)
+            }
+            _ => {
+                let list: Option<Vec<String>> = roots.iter().take(4).map(|&root| spoken(root)).collect();
+                let list = list.ok_or(None)?;
+                let (last, rest) = list.split_last().ok_or(None)?;
+                Err(Some(Why::ManyRoots(finding.to_string(), format!("{} and {last}", rest.join(", ")))))
+            }
+        }
+    }
+}
+
+/// Works out a formula with the values given after it, or an equation with
+/// one value left to find. Returns nothing if the input is not of that
+/// form. Otherwise the answer, or a refusal with the reason where that is
+/// certain.
 fn given(text: &str) -> Option<Result<Outcome, Option<Why>>> {
     let (formula, values) = split_given(text)?;
     Some(given_parts(formula, &values))
@@ -2302,113 +2615,196 @@ fn given(text: &str) -> Option<Result<Outcome, Option<Why>>> {
 
 fn given_parts(formula: &str, values: &[(&str, &str)]) -> Result<Outcome, Option<Why>> {
     for (index, (name, _)) in values.iter().enumerate() {
-        // A function, a constant or a keyword cannot also name a value.
+        // A function, a constant, a keyword or the times sign cannot also
+        // name a value.
         if !is_valid_name(name) || is_complex_function(name) || matches!(*name, "j" | "π") {
-            return Err(None);
+            return Err(Some(Why::NameTaken(name.to_string())));
         }
         if values[..index].iter().any(|(earlier, _)| earlier == name) {
             return Err(Some(Why::GivenTwice(name.to_string())));
         }
     }
-    // The names the lexer should know. A value cannot use its own name,
-    // which is what lets `V = 12V` be twelve volts.
-    let others = |own: &str| -> Vec<(String, Quantity)> {
-        values.iter().filter(|(name, _)| *name != own).map(|(name, _)| (name.to_string(), Quantity::plain(1.0))).collect()
-    };
-
-    let (_, formula) = without_label(formula);
-    let mut parts: Vec<(&str, Vec<Token>)> = Vec::new();
-    for (name, text) in std::iter::once(&("", formula)).chain(values) {
-        let tokens = lex(text, &others(name)).ok_or(None)?;
-        if let Some(word) = unit_or_name(&tokens) {
-            return Err(Some(Why::UnitOrName(word)));
-        }
-        parts.push((name, tokens));
-    }
-
-    // A word nothing knows. One such word is a value that was not given,
-    // or several values run together; more than one means the input is in
-    // words, which is for a model.
     let is_given = |word: &str| values.iter().any(|(name, _)| *name == word);
-    let mut unknown: Vec<&str> = Vec::new();
-    for token in parts.iter().flat_map(|(_, tokens)| tokens) {
-        let strange = match token {
-            Token::Word(word) => (!all_maths(std::slice::from_ref(token))).then_some(word.as_str()),
-            Token::Name(name) => (!is_given(name)).then_some(name.as_str()),
-            _ => None,
-        };
-        if let Some(word) = strange
-            && !unknown.contains(&word)
-        {
-            unknown.push(word);
-        }
-    }
-    match unknown[..] {
-        [] => {}
-        [word] => {
-            let names: Vec<&str> = values.iter().map(|(name, _)| *name).collect();
-            return Err(Some(match run_together(word, &names) {
-                Some(pieces) => Why::RunTogether(word.to_string(), pieces.join("*")),
-                None => Why::NotGiven(word.to_string()),
-            }));
-        }
-        _ => return Err(None),
-    }
 
-    // Every value given must be used, or the formula is not the one meant.
-    let uses = |name: &str| {
-        parts.iter().flat_map(|(_, tokens)| tokens).any(|token| matches!(token, Token::Name(used) if used == name))
+    // What is left of the `=`. A name there that was given no value is only
+    // the user's name for the answer. Anything else makes it an equation.
+    let (left, right) = match formula.split_once('=') {
+        Some((left, right)) => (Some(left.trim()), right.trim()),
+        None => (None, formula),
     };
-    if let Some((name, _)) = values.iter().find(|(name, _)| !uses(name)) {
-        return Err(Some(Why::NotUsed(name.to_string())));
+    if right.contains('=') {
+        return Err(None);
     }
+    let left = left.filter(|left| !is_label(left) || is_given(left));
+    let texts: Vec<(&str, &str)> =
+        left.map(|left| ("", left)).into_iter().chain([("", right)]).chain(values.iter().copied()).collect();
+    let numbered: Vec<&str> = texts.iter().flat_map(|(_, text)| numbered_names(text)).collect();
+    let form = Form { texts, values, equation: left.is_some(), numbered };
+    let parts = form.lex(None)?;
 
-    // Whether the work is electrical or mechanical, from the units of every
-    // part. It settles a lone `m` anywhere in the input.
-    let mut flags = Hints::default();
-    for token in parts.iter().flat_map(|(_, tokens)| tokens) {
-        if let Token::Word(word) = token
-            && let Some(Suffix::Unit { index, .. }) = lookup(word)
-        {
-            match UNITS[index].family {
-                Electrical => flags.electrical = true,
-                Mechanical => flags.mechanical = true,
-                Neutral => {}
+    // Words nothing knows. In an equation one of them is the value to
+    // find; in a formula it is a value that was not given.
+    let mut strange: Vec<&str> = Vec::new();
+    // Unit letters not straight after a number. In an equation, one of
+    // them may be the value to find and not the unit. Those standing alone
+    // (`V` in `V^2 / R`) are likelier to be than those in a run of units
+    // behind a number (`C` in `1Mohm*C`), so the two are kept apart.
+    let mut alone: Vec<&str> = Vec::new();
+    let mut in_a_run: Vec<&str> = Vec::new();
+    for tokens in &parts {
+        let mut in_units = false;
+        for (at, token) in tokens.iter().enumerate() {
+            let before = at.checked_sub(1).map(|before| &tokens[before]);
+            let after_number = matches!(before, Some(Token::Number(_)));
+            // The same run of units that `unit_or_name` follows.
+            in_units = match token {
+                Token::Word(_) if after_number => true,
+                Token::Word(_) | Token::Super(_) | Token::Slash | Token::Star | Token::Caret => in_units,
+                Token::Number(_) | Token::Minus if matches!(before, Some(Token::Caret | Token::Minus)) => in_units,
+                _ => false,
+            };
+            let (list, word) = match token {
+                Token::Name(name) if !is_given(name) => (&mut strange, name.as_str()),
+                Token::Word(word) if !all_maths(std::slice::from_ref(token)) => (&mut strange, word.as_str()),
+                Token::Word(word)
+                    if !after_number && is_unit_word(word) && !matches!(word.as_str(), "to" | "in") =>
+                {
+                    (if in_units { &mut in_a_run } else { &mut alone }, word.as_str())
+                }
+                _ => continue,
+            };
+            if !list.contains(&word) {
+                list.push(word);
             }
         }
     }
 
-    // The values first, each as soon as the values it uses are known.
-    let mut known: Vec<(String, Quantity)> = Vec::new();
-    let mut carried = flags.clone();
-    let formula_tokens = parts.remove(0).1;
-    while !parts.is_empty() {
-        let ready = parts.iter().position(|(_, tokens)| {
-            tokens.iter().all(|token| match token {
-                Token::Name(name) => known.iter().any(|(have, _)| have == name),
-                _ => true,
-            })
-        });
-        // Values that depend on one another in a ring.
-        let Some(ready) = ready else { return Err(None) };
-        let (name, tokens) = parts.remove(ready);
-        // A value is named, so a prefix with no unit is refused, as it is
-        // for any named answer.
-        let part = Part { names: &known, hints: &flags, value_only: true };
-        let outcome =
-            reading_named(&tokens, None, true, &part).ok_or_else(|| why_refused(&tokens, None, true, &part))?;
-        // A percentage does not keep its meaning as a bare value.
-        if outcome.raw.percent {
-            return Err(None);
-        }
-        carried.add(&outcome.hints);
-        known.push((name.to_string(), outcome.raw));
+    let names: Vec<&str> = values.iter().map(|(name, _)| *name).collect();
+    if let [word] = strange[..]
+        && let Some(pieces) = run_together(word, &names)
+    {
+        // Several values run together, as in `2πRC`.
+        return Err(Some(Why::RunTogether(word.to_string(), pieces.join("*"))));
     }
+    if !form.equation {
+        return match strange[..] {
+            [] => form.work_out(None),
+            // One strange word is a value that was not given. More than
+            // that means the input is in words, which is for a model.
+            [word] => Err(Some(Why::NotGiven(word.to_string()))),
+            _ => Err(None),
+        };
+    }
+    match strange[..] {
+        [word] => {
+            let chars: Vec<char> = word.chars().collect();
+            if identifier_end(&chars, 0) != Some(chars.len()) || !is_valid_name(word) {
+                return Err(None);
+            }
+            form.work_out(Some(word))
+        }
+        [first, second] => Err(Some(Why::TwoNotGiven(first.to_string(), second.to_string()))),
+        [] => {
+            // A unit's letter may be the value to find. It is, if the
+            // equation makes sense with it as a value, and with no other
+            // of its kind. `Err(None)` here means more than one did.
+            let one_of = |letters: &[&str]| -> Option<Result<Outcome, Option<Why>>> {
+                let mut found = None;
+                for letter in letters {
+                    let result = form.work_out(Some(letter));
+                    if matches!(result, Ok(_) | Err(Some(Why::NoRoot(_) | Why::ManyRoots(..)))) {
+                        if found.is_some() {
+                            return Some(Err(None));
+                        }
+                        found = Some(result);
+                    }
+                }
+                found
+            };
+            // Letters standing alone first. Then, if the equation holds
+            // together as it is written, there is nothing to find. Only
+            // if it does not is a letter in a run of units tried.
+            if let Some(result) = one_of(&alone) {
+                return result;
+            }
+            if let Err(Some(Why::NothingToSolve)) = form.work_out(None) {
+                return Err(Some(Why::NothingToSolve));
+            }
+            one_of(&in_a_run).unwrap_or_else(|| {
+                let lone_x = form.texts.iter().any(|(_, text)| has_lone_x(text));
+                Err(lone_x.then(|| Why::NameTaken("x".into())))
+            })
+        }
+        _ => Err(None),
+    }
+}
 
-    let split = conversion_split(&formula_tokens);
-    let part = Part { names: &known, hints: &carried, value_only: false };
-    reading_named(&formula_tokens, split, true, &part)
-        .ok_or_else(|| why_refused(&formula_tokens, split, true, &part))
+/// The values of `x` at which `apart` comes to nothing, for `x` from
+/// 10⁻¹⁵ to 10¹⁵ either side of zero, and zero itself.
+///
+/// `apart` gives how far the two sides of an equation are from equal, and
+/// how large they are, or nothing where they cannot be worked out. The
+/// range is walked sixteen steps to the decade; wherever the sides
+/// cross, the place is closed in on by halving. A crossing that is not a
+/// meeting (either side of `1/x` at zero, say) is thrown out by checking
+/// that the sides really are equal there.
+///
+/// Two answers within about fifteen per cent of one another can be missed,
+/// as can one where the sides touch without crossing. A value that is
+/// returned always fits: it has been put back into the equation.
+fn roots_of(apart: impl Fn(f64) -> Option<(f64, f64)>) -> Vec<f64> {
+    let meets = |x: f64| apart(x).is_some_and(|(gap, size)| gap.abs() <= 1e-9 * size || gap == 0.0);
+    let mut roots: Vec<f64> = Vec::new();
+    let mut found = |x: f64| {
+        if meets(x) && !roots.iter().any(|&have| (have - x).abs() <= 1e-9 * have.abs().max(x.abs())) {
+            roots.push(x);
+        }
+    };
+
+    if apart(0.0).is_some_and(|(gap, _)| gap == 0.0) {
+        found(0.0);
+    }
+    for sign in [1.0, -1.0] {
+        let mut before: Option<(f64, f64)> = None;
+        for step in -240..=240 {
+            let x = sign * 10f64.powf(f64::from(step) / 16.0);
+            let Some((gap, _)) = apart(x) else {
+                before = None;
+                continue;
+            };
+            if gap == 0.0 {
+                found(x);
+                // Carry on from just past it, so that another answer close
+                // by is still crossed.
+                let past = x * (1.0 + 1e-6);
+                before = apart(past).map(|(gap, _)| (past, gap));
+                continue;
+            } else if let Some((mut low, low_gap)) = before
+                && low_gap != 0.0
+                && (low_gap < 0.0) != (gap < 0.0)
+            {
+                // Halve between the two, by size, until they meet.
+                let mut high = x;
+                for _ in 0..200 {
+                    let middle = sign * (low.abs() * high.abs()).sqrt();
+                    if middle == low || middle == high {
+                        break;
+                    }
+                    match apart(middle) {
+                        Some((middle_gap, _)) if middle_gap != 0.0 && (middle_gap < 0.0) == (low_gap < 0.0) => {
+                            low = middle;
+                        }
+                        Some(_) => high = middle,
+                        None => break,
+                    }
+                }
+                found(high);
+            }
+            before = Some((x, gap));
+        }
+    }
+    roots.sort_by(f64::total_cmp);
+    roots
 }
 
 /// Splits a word into values the user named, and π, if it is nothing but
@@ -3612,12 +4008,97 @@ mod tests {
         silent("voltage divider, 9V in, R1 = 10k on top, R2 = 4.7k to ground. vout?");
         // Names that mean something else, values in a ring, and commas that
         // are not between values.
-        silent("y = e * 2, e = 3");
-        silent("y = sin * 2, sin = 3");
+        why("y = e * 2, e = 3", "e already means something here, so it cannot name a value.");
+        why("y = sin * 2, sin = 3", "sin already means something here, so it cannot name a value.");
         silent("a = b * 2, b = c, c = b");
         silent("2, 3");
         silent("1,000 + 2");
         silent("V = 4,7 * 2");
+    }
+
+    #[test]
+    fn solving_for_the_value_that_was_not_given() {
+        check("12V = I * 8ohm", "1.500 A");
+        check("V = I * R, V = 12V, R = 8ohm", "1.500 A");
+        check("V = I * R, V = 12V, I = 1.5A", "8.000 Ω");
+        check("fc = 1/(2*pi*R*C), fc = 10 Hz, R = 1Mohm", "15.92 nF");
+        check("Vth = Vcc * R2 / (R1 + R2), Vth = 1.623V, Vcc = 9V, R1 = 100kohm", "22.00 kΩ");
+        check("Rt = R1 || R2, Rt = 5kohm, R1 = 10kohm", "10.00 kΩ");
+        check("5V - I * 1kohm = 0.65V", "4.350 mA");
+        check("tau = R * C, tau = 22 s, R = 1Mohm", "22.00 µF");
+        check("f = 1/T, f = 50 Hz", "20.00 ms");
+        check("T = Ta + P * Rth, T = 125 C, Ta = 25 C, Rth = 50 C/W", "2.000 W");
+        // The value to find may be inside a value that was given.
+        check("Vout = Vin * k, k = R2/(R1+R2), Vout = 3V, Vin = 9V, R1 = 10kohm", "5.000 kΩ");
+        // Equations that cannot be rearranged.
+        check("2 = exp(y)", "0.6931");
+        check("5V - I * 1kohm = 25.85mV * ln(I / 1e-14 A + 1)", "4.308 mA");
+        check("0 = y * 5", "0");
+        // The answer is marked as coming from a formula with its values.
+        assert!(evaluate("12V = I * 8ohm").unwrap().given);
+        assert!(!evaluate("12V / 8ohm").unwrap().given);
+    }
+
+    #[test]
+    fn a_unit_letter_may_be_the_value_to_find() {
+        // Standing alone, where the equation makes sense with it as a
+        // value and with no other.
+        check("5 N = m * 9.81 m/s^2", "509.7 g");
+        check("20 = 20*log(A)", "10.00");
+        check("12 V = (2 + 1) A * R", "4.000 Ω");
+        // In a run of units behind a number, but only if the equation
+        // does not hold together as it is written.
+        check("10 Hz = 1/(2*pi*1Mohm*C)", "15.92 nF");
+        // This one does, so there is nothing to find, though a value for
+        // `s` would fit it.
+        why("10 N = 2 kg * 5 m/s^2", "Every value is given, so there is nothing to solve for.");
+        why("2 + 2 = 4", "Every value is given, so there is nothing to solve for.");
+    }
+
+    #[test]
+    fn an_equation_with_more_than_one_answer() {
+        // The same size either side of zero: the positive one, with the
+        // other on the line beneath.
+        let answer = evaluate("P = V^2 / R, P = 18 W, R = 8 ohm").unwrap();
+        assert_eq!((answer.number.as_str(), answer.unit.as_str()), ("12.00", "V"));
+        assert_eq!(answer.parts.as_deref(), Some("or −12.00 V"));
+        assert_eq!(answer.copy, "12");
+        let answer = evaluate("P = I^2 * R, P = 2 W, R = 8 ohm").unwrap();
+        assert_eq!((answer.number.as_str(), answer.parts.as_deref()), ("500.0", Some("or −500.0 mA")));
+        // Anything else is refused, with the values named.
+        why(
+            "Id = Idss * (1 - Vgs/Vp)^2, Id = 2 mA, Idss = 8 mA, Vp = -3V",
+            "More than one value of Vgs fits: −4.500 V and −1.500 V.",
+        );
+        why("y^2 - 5*y + 6 = 0", "More than one value of y fits: 2.000 and 3.000.");
+        // Two answers close together, one of them met exactly.
+        why("y^2 - 2.1*y + 1.1 = 0", "More than one value of y fits: 1.000 and 1.100.");
+        why("y^2 = -4", "No value of y was found that makes the two sides equal.");
+        // Where the sides touch without crossing, the answer is not found.
+        why("(y - 2)^2 = 0", "No value of y was found that makes the two sides equal.");
+    }
+
+    #[test]
+    fn equations_that_are_refused() {
+        why("V = I * R, V = 12V, I = 1.5A, R = 8ohm", "Every value is given, so there is nothing to solve for.");
+        why("V = I * R, V = 12V", "Two values are not given: I and R.");
+        why("12V = I * 4.7k", "4.7k has a prefix but no unit.");
+        why("5V = I + 3ohm", "No kind of quantity for I makes the two sides agree.");
+        why("2 = exp(x)", "x is the times sign here, so it cannot name a value. Use another letter.");
+        why(
+            "X = 2*pi*f*L, X = 628.3 ohm, L = 100mH",
+            "X is the times sign here, so it cannot name a value. Use another letter.",
+        );
+        // The value could be a plain number or an angle.
+        silent("0.5 = sin(y)");
+        // Words.
+        silent("voltage divider 9V in R1 = 10k");
+        // A name in front that was given no value is still only a name,
+        // so a formula is read as it was.
+        check("VGS = -0.3V * 2", "−600.0 mV");
+        check("V = 12V", "12.00 V");
+        why("re = 25mV / Ic, Ib = 2mA", "Ic is not given a value.");
+        why("Vth = Vcc * R2 / (R1 + R2), Vcc = 9V, R1 = 100kohm", "R2 is not given a value.");
     }
 
     #[test]

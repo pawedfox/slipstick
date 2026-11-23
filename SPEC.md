@@ -18,12 +18,14 @@ revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
-becomes a last resort. Its first two slices are built (2026-11-23), and
-neither is released yet. 0.12.0, which was never tagged: on Enter, the app
-says why it refused an input, where it knows for certain (see "Saying
-why" under "Instant path"). 0.13.0: a formula with its values after it is
-answered as you type (see "Values after a formula").
-Next: the third slice, solving for an unknown.
+becomes a last resort. Its first three slices are built (2026-11-23), and
+none is released yet; 0.12.0 and 0.13.0 were never tagged. 0.12.0: on
+Enter, the app says why it refused an input, where it knows for certain
+(see "Saying why" under "Instant path"). 0.13.0: a formula with its values
+after it is answered as you type (see "Values after a formula"). 0.14.0:
+an equation with one value left out is solved for it (see "Solving for
+an unknown").
+Next: the fourth slice, named values that last the session.
 
 ## Purpose
 
@@ -80,7 +82,8 @@ Unofficial project. Not affiliated with or endorsed by Anthropic.
    screenshot). If it was plain maths that the engine refused, and the
    engine knows why, Enter says why first, and Enter again asks Claude
    (from 0.12.0). A formula with its values after it is answered as
-   typed, and Enter then has Claude check it (from 0.13.0).
+   typed, and Enter then has Claude check it (from 0.13.0). The same goes
+   for an equation with one value left out (from 0.14.0).
 4. The answer appears large, in engineering notation with units.
 5. Click back into other work. The window stays on top with the answer visible.
 6. Esc hides it to the tray.
@@ -698,7 +701,8 @@ Rules:
   stays in place but dimmed, and cannot be copied. A dimmed answer is never
   current.
 - Instant answers have no steps and no notes. A complex one has its
-  parts on a second line.
+  parts on a second line, and so has an equation's second answer (see
+  "Solving for an unknown").
 - A plain number between 0.1 and 1000 is shown without a prefix (`0.1250`,
   `338.6`); everything else uses engineering notation (`5.998 k`).
 - A plain number in the thousandths is written out (`0.05000`), never given
@@ -709,6 +713,106 @@ Rules:
 
 Not in the instant path: values that last from one input to the next, the
 decimal comma, and a plain ratio in decibels. Those go to Claude.
+
+### Solving for an unknown (0.14.0)
+
+The third slice of "Hardening the engine". An equation with one value
+left out is solved for that value.
+
+| Input | Answer |
+|---|---|
+| `12V = I * 8ohm` | 1.500 A |
+| `V = I * R, V = 12V, I = 1.5A` | 8.000 Ω |
+| `fc = 1/(2*pi*R*C), fc = 10 Hz, R = 1Mohm` | 15.92 nF |
+| `Vth = Vcc * R2 / (R1 + R2), Vth = 1.623V, Vcc = 9V, R1 = 100kohm` | 22.00 kΩ |
+| `5V - I * 1kohm = 25.85mV * ln(I / 1e-14 A + 1)` | 4.308 mA |
+| `T = Ta + P * Rth, T = 125 C, Ta = 25 C, Rth = 50 C/W` | 2.000 W |
+| `5 N = m * 9.81 m/s^2` | 509.7 g |
+| `10 Hz = 1/(2*pi*1Mohm*C)` | 15.92 nF |
+| `P = V^2 / R, P = 18 W, R = 8 ohm` | 12.00 V, with "or −12.00 V" beneath |
+
+**What counts as an equation.** Something other than a bare name to the
+left of the `=` (`12V = …`), or a name there that is also given a value
+after it (`V = I * R, V = 12V, …`). A name in front that is given no value
+is still only the user's name for the answer, so a formula is read as it
+was. Nothing that was answered before has changed: such inputs were
+refused.
+
+**Which value is found.** It is never asked for; it is the one left out.
+
+- One word nothing knows is the value to find (`I` in `12V = I * 8ohm`).
+  Two such words are refused, with both named.
+- With no such word, a unit's letter may be it, where the equation makes
+  sense with that letter as a value and with no other. Letters standing
+  alone are tried first (`V` in `V^2 / R`, `m` in `m * 9.81 m/s^2`).
+- If none of those fits and the equation holds together as it is written,
+  there is nothing to find: `10 N = 2 kg * 5 m/s^2` is a statement, though
+  a value for `s` would fit it.
+- Only if it does not hold together is a letter in a run of units behind
+  a number tried (`C` in `1Mohm*C`).
+- A name with a digit in it is read whole (`R2`), which the lexer alone
+  would take as a word and a number. A unit with a power on it (`mm2`) is
+  not such a name.
+- `x` is the times sign and cannot be the value. It is said so.
+
+**What kind of quantity it is.** Every kind the engine has a name for is
+tried, and the one for which the two sides can be compared is taken. None,
+and the equation is refused with a reason; more than one (`0.5 = sin(y)`,
+where `y` could be a plain number or an angle), and it is refused without
+one.
+
+**How it is found** (`roots_of` in `calc.rs`). There is no algebra. The
+value is tried from 10⁻¹⁵ to 10¹⁵ either side of zero, sixteen steps to
+the decade, and wherever the two sides cross, the place is closed in on by
+halving. A crossing where the sides are not in fact equal (either side of
+a division by zero) is thrown out. So:
+
+- **A value that is shown always fits.** It has been put back into the
+  equation, to within a part in 10⁹.
+- **Not every answer is sure to be found.** Two within about fifteen per
+  cent of one another can both be missed, as can one where the sides touch
+  without crossing (`(y - 2)^2 = 0`), or one outside the range. The reason
+  then says no value was found, not that there is none.
+
+**More than one answer** (decided with the user 2026-11-23):
+
+- Two of the same size and opposite sign: the positive one is the answer,
+  and can be copied; the other is on the line beneath, as "or −12.00 V".
+  Nothing is left out and nothing is guessed.
+- Anything else is refused, with the values named: "More than one value of
+  Vgs fits: −4.500 V and −1.500 V."
+
+The answer is marked `given`, as for a formula with its values, so Enter
+has Claude check it when Claude is connected.
+
+The reasons this adds to "Saying why":
+
+| Input | It says |
+|---|---|
+| `V = I * R, V = 12V, I = 1.5A, R = 8ohm` | Every value is given, so there is nothing to solve for. |
+| `V = I * R, V = 12V` | Two values are not given: I and R. |
+| `5V = I + 3ohm` | No kind of quantity for I makes the two sides agree. |
+| `y^2 = -4` | No value of y was found that makes the two sides equal. |
+| `y^2 - 5*y + 6 = 0` | More than one value of y fits: 2.000 and 3.000. |
+| `2 = exp(x)` | x is the times sign here, so it cannot name a value. Use another letter. |
+| `y = e * 2, e = 3` | e already means something here, so it cannot name a value. |
+
+Not done: solving for a temperature on a scale (`Ta` above), for a complex
+value, or for a value whose unit has no name; and saying which value was
+found, which the window does not show.
+
+Checked for 0.14.0 (2026-11-23): 79 unit tests, of which four groups are
+new (solving, unit letters as the value, more than one answer, and
+refusals), and the 75 from before pass, with one expectation changed (a
+constant's or a function's name given a value now draws a reason); every
+reference
+problem through the instant path alone, which answers the same six as
+0.13.0, and asked for a reason, which the same six get; and the window in
+the built-in browser, where equations answer as they are typed, the second
+answer sits on the line beneath, and the new reasons appear on Enter. Not
+checked: the real app, and Enter on a solved equation with Claude
+connected. The instructions to Claude are unchanged, so the reference set
+was not run through a model.
 
 ### Values after a formula (0.13.0)
 
@@ -1686,8 +1790,10 @@ types.
    *Built 2026-11-23, in 0.13.0: see "Values after a formula" under
    "Instant path". As first written here the example had `Rd = 10k`,
    which is refused: a prefix needs its unit.*
-3. **Solving for an unknown:** `10 Hz = 1/(2*pi*1M*C)` gives C. The solver
-   exists already, for Claude's working.
+3. **Solving for an unknown:** `10 Hz = 1/(2*pi*1Mohm*C)` gives C. *Built
+   2026-11-23, in 0.14.0: see "Solving for an unknown" under "Instant
+   path". The solver Claude's working uses needs a starting guess, which
+   typed input has not got, so this one searches instead.*
 4. **Named values that last the session:** `R1 = 10k`, then `R1` in what
    follows. Held in memory only.
 5. **Constants and units for science:** Boltzmann's constant, the electron
