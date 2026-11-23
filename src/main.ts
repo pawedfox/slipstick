@@ -66,7 +66,15 @@ type Value = {
   /** The input was a formula with its values after it, worked out as
    *  typed. Enter sends it on to Claude to be checked. */
   given?: boolean;
+  /** The values kept for the session that an instant answer used:
+   *  `Vcc = 9.000 V, R1 = 10.00 kΩ`. Shown beneath it. */
+  uses?: string;
 };
+
+/** A value kept under a name for the session (`R1 = 10kohm`, then `R1` in
+ *  what follows). The Rust side makes these and reads them back; the
+ *  window only holds them, and looks at nothing but the name. */
+type Kept = { name: string } & Record<string, unknown>;
 
 /** One answer, several of equal standing, or two values compared. */
 type Layout = "single" | "list" | "compare";
@@ -166,6 +174,9 @@ const state = {
   /** The input whose refusal the message explains. Enter on it again sends
    *  it to Claude after all. */
   explained: null as string | null,
+  /** The input Enter has just kept under its name, or said it could not.
+   *  Enter on it again does not keep it a second time. */
+  keptText: null as string | null,
   /** The settings. These are the defaults until the Rust side has answered. */
   settings: {
     hotkey: "Ctrl+Alt+C",
@@ -216,6 +227,17 @@ function mathNodes(text: string): Node[] {
   }
   nodes.push(document.createTextNode(text.slice(last)));
   return nodes;
+}
+
+/** The kept values an answer used (`Vcc = 9.000 V, R1 = 10.00 kΩ`), each
+ *  held together so that a long line breaks between values, not in one. */
+function usedNodes(text: string): Node[] {
+  return text.split(", ").flatMap((value, index) => {
+    const one = document.createElement("span");
+    one.className = "used";
+    one.append(...mathNodes(value));
+    return index ? [document.createTextNode(", "), one] : [one];
+  });
 }
 
 const spaced = (value: { number: string; unit: string }) => `${value.number} ${value.unit}`.trim();
@@ -279,13 +301,16 @@ function render() {
     if (toggle.parentElement !== host) host.append(toggle);
 
     // A complex answer's real and imaginary parts go first, on their own.
+    // Then the kept values an instant answer used, so that a value kept
+    // some time ago is never used unseen.
     also.replaceChildren(
       ...(shown.parts ? [line("also-line parts", shown.parts)] : []),
+      ...(shown.uses ? [line("also-line parts", ...usedNodes(shown.uses))] : []),
       ...(shown.also ?? []).map((value) =>
         line("also-line", ...mathNodes(value.name ?? ""), ` = ${spaced(value)}`),
       ),
     );
-    also.hidden = !shown.parts && !shown.also?.length;
+    also.hidden = !shown.parts && !shown.uses && !shown.also?.length;
 
     formula.replaceChildren(...mathNodes(shown.formula ?? ""));
     formula.hidden = !shown.formula;
@@ -824,6 +849,64 @@ function recall(direction: "older" | "newer"): boolean {
   return true;
 }
 
+// ---- values kept for the session -----------------------------------------
+//
+// Enter on an answer with a name in front (`R1 = 10kohm`) keeps it under
+// that name, and later inputs may use the name. Held in memory only, like
+// the history: nothing is written to disk, and it is gone when the app
+// quits. The engine is handed the list with each input and keeps nothing
+// itself.
+
+const KEPT_LIMIT = 200;
+const kept: Kept[] = [];
+
+/** Enter on a named input: keeps its value, or says why it cannot be kept.
+ *  Returns false where there is nothing to keep, and Enter means what it
+ *  always did. */
+async function keepNamed(text: string, answered: boolean): Promise<boolean> {
+  let entry: Kept | null = null;
+  let reason: string | null = null;
+  try {
+    entry = await invoke<Kept | null>("keep", { input: text, kept });
+  } catch (error) {
+    reason = String(error);
+  }
+  if (input.value.trim() !== text) return true; // the box has changed meanwhile
+  if (!entry && !reason) return false;
+
+  // A formula with its values after it can also be checked by Claude. If
+  // it cannot be kept, Enter goes straight on to that, as it did before
+  // values could be kept; if it can, Enter again does.
+  const checkable = answered && Boolean(state.shown?.given);
+  if (checkable) await refreshClaude();
+  if (reason && checkable && claude.connected) return false;
+
+  if (entry) {
+    const name = entry.name;
+    // Kept again, a name's earlier value goes.
+    const at = kept.findIndex((other) => other.name === name);
+    if (at < 0 && kept.length >= KEPT_LIMIT) {
+      reason = `No more values can be kept: there are ${KEPT_LIMIT}. Quitting Slipstick clears them.`;
+    } else {
+      if (at >= 0) kept.splice(at, 1);
+      kept.push(entry);
+      const more = checkable && claude.connected ? " Enter again has Claude check the formula." : "";
+      reason = `${name} is kept until Slipstick is quit.${more}`;
+    }
+  }
+  // A value that is kept but not shown (`beta = 200`) leaves no old answer
+  // behind it.
+  if (!answered) {
+    state.shown = null;
+    state.stale = false;
+  }
+  state.keptText = text;
+  state.offer = false;
+  state.message = reason;
+  void update();
+  return true;
+}
+
 // ---- input ---------------------------------------------------------------
 
 function fitInput() {
@@ -850,12 +933,13 @@ async function applyInstantAnswer() {
   // With a picture attached the words are for Claude, not for the instant path.
   const hasPictures = state.pictures.length > 0;
   const result =
-    text.trim() && !hasPictures ? await invoke<Value | null>("evaluate", { input: text }) : null;
+    text.trim() && !hasPictures ? await invoke<Value | null>("evaluate", { input: text, kept }) : null;
   if (ticket !== evaluation) return;
 
   state.message = null;
   state.offer = false;
   state.explained = null;
+  state.keptText = null;
   if (result) {
     state.shown = result;
     state.stale = false;
@@ -1024,6 +1108,15 @@ async function submit() {
     void update();
   } else if (state.asking) {
     // Already being asked.
+  } else if (
+    !state.pictures.length &&
+    !state.offer &&
+    !(answered && state.fromClaude) &&
+    state.keptText !== text &&
+    (await keepNamed(text, Boolean(answered)))
+  ) {
+    // A name in front: the value is kept under it for the session, or the
+    // message says why it cannot be.
   } else if (answered) {
     // Already answered. A formula with its values after it is worked out
     // exactly as typed, though, so Enter has Claude check it: a formula
@@ -1033,12 +1126,15 @@ async function submit() {
       await refreshClaude();
       if (claude.connected && input.value.trim() === text) void ask(text);
     }
+  } else if (state.keptText === text) {
+    // Kept a moment ago, with no answer to show (`beta = 200`). There is
+    // nothing more for Enter to do.
   } else if (state.offer) {
     void connect(); // Enter accepts the offer
   } else if (!state.pictures.length && state.explained !== text) {
     // The instant path refused it. If it knows why, say so first; Enter
     // again on the same text sends it to Claude after all.
-    const reason = await invoke<string | null>("explain", { input: text });
+    const reason = await invoke<string | null>("explain", { input: text, kept });
     if (input.value.trim() !== text) return; // the box has changed meanwhile
     if (!reason) {
       void needsClaude(text);

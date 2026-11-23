@@ -91,13 +91,21 @@ async function answer(request, response) {
     ...(deeper ? ['--deeper'] : []),
   ];
 
+  // The values kept for the session go along too, as the window holds them.
+  const kept = (asked) => ['--kept', JSON.stringify(Array.isArray(asked.kept) ? asked.kept : [])];
+
   if (posted && request.url === '/evaluate') {
     const asked = JSON.parse(await body(request));
-    return send((await solve(['--instant', ...options(asked)], asked.input)) || 'null');
+    return send((await solve(['--instant', ...options(asked), ...kept(asked)], asked.input)) || 'null');
   }
   if (posted && request.url === '/explain') {
     const asked = JSON.parse(await body(request));
-    return send((await solve(['--why'], asked.input)) || 'null');
+    return send((await solve(['--why', ...kept(asked)], asked.input)) || 'null');
+  }
+  if (posted && request.url === '/keep') {
+    // `{"kept": …}`, `{"reason": "…"}`, or null where Enter keeps nothing.
+    const asked = JSON.parse(await body(request));
+    return send((await solve(['--keep', ...kept(asked)], asked.input)) || 'null');
   }
   if (posted && request.url === '/ask') {
     // The whole request (problem and any image) goes through as JSON.

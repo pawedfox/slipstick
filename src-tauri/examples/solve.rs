@@ -14,8 +14,11 @@
 //! With `--instant`, reads typed input instead and prints the instant path's
 //! answer, or `null` if it has none. With `--why`, reads typed input and
 //! prints the reason the instant path gives for refusing it, or `null` if
-//! it gives none. With `--instructions`, prints the instructions given to
-//! Claude.
+//! it gives none. With `--keep`, reads typed input and prints what Enter
+//! would keep for the session: `{"kept": …}`, `{"reason": "…"}`, or `null`
+//! where the input is not one to keep. `--kept JSON` gives any of those
+//! three the values already kept, as a list of what `--keep` printed. With
+//! `--instructions`, prints the instructions given to Claude.
 //!
 //! `--figures N` shows answers to N significant figures (3 to 6), and
 //! `--deeper` asks the slower model, as the two settings do in the app.
@@ -44,8 +47,26 @@ fn run() {
     let mut reply = String::new();
     std::io::stdin().read_to_string(&mut reply).expect("could not read standard input");
 
+    // The values kept for the session, as the window holds them.
+    let args: Vec<String> = std::env::args().collect();
+    let kept: Vec<calc::Kept> = args
+        .iter()
+        .position(|arg| arg == "--kept")
+        .and_then(|at| serde_json::from_str(args.get(at + 1)?).ok())
+        .unwrap_or_default();
+
+    if std::env::args().any(|arg| arg == "--keep") {
+        let outcome = match calc::keep(&reply, &kept) {
+            Ok(entry) => serde_json::json!({ "kept": entry }),
+            Err(Some(reason)) => serde_json::json!({ "reason": reason }),
+            Err(None) => serde_json::Value::Null,
+        };
+        println!("{outcome}");
+        return;
+    }
+
     if std::env::args().any(|arg| arg == "--instant") {
-        let found = calc::evaluate_with_value(&reply).map(|(answer, si_value)| {
+        let found = calc::evaluate_with_value_in(&reply, &kept).map(|(answer, si_value)| {
             // The answer as the window gets it, with the value for checking.
             let mut found = serde_json::to_value(&answer).expect("could not write JSON");
             found["si_value"] = si_value.into();
@@ -56,7 +77,7 @@ fn run() {
     }
 
     if std::env::args().any(|arg| arg == "--why") {
-        println!("{}", serde_json::to_string(&calc::why_not(&reply)).expect("could not write JSON"));
+        println!("{}", serde_json::to_string(&calc::why_not_in(&reply, &kept)).expect("could not write JSON"));
         return;
     }
 

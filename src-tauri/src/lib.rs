@@ -378,16 +378,32 @@ fn hide_window(app: AppHandle) {
 }
 
 /// The instant path. Returns nothing unless the input is plain maths.
+///
+/// `kept` is the values kept for the session, which the input may use by
+/// name. The window holds them, in memory only, and sends them with each
+/// input; nothing here remembers them.
 #[tauri::command]
-fn evaluate(state: tauri::State<'_, AppState>, input: String) -> Option<calc::Answer> {
-    calc::with_sig_figs(state.figures(), || calc::evaluate(&input))
+fn evaluate(state: tauri::State<'_, AppState>, input: String, kept: Vec<calc::Kept>) -> Option<calc::Answer> {
+    calc::with_sig_figs(state.figures(), || calc::evaluate_in(&input, &kept))
 }
 
 /// Why the instant path has no answer for this input, in one plain line,
 /// where the reason is certain. Asked for when Enter is pressed.
 #[tauri::command]
-fn explain(input: String) -> Option<String> {
-    calc::why_not(&input)
+fn explain(input: String, kept: Vec<calc::Kept>) -> Option<String> {
+    calc::why_not_in(&input, &kept)
+}
+
+/// Enter on an input with a name in front: the value to keep under that
+/// name for the session. An error says why it cannot be kept; nothing
+/// means the input is not one to keep, and Enter does what it always did.
+#[tauri::command]
+fn keep(input: String, kept: Vec<calc::Kept>) -> Result<Option<calc::Kept>, String> {
+    match calc::keep(&input, &kept) {
+        Ok(entry) => Ok(Some(entry)),
+        Err(Some(reason)) => Err(reason),
+        Err(None) => Ok(None),
+    }
 }
 
 /// Looks for the user's Claude Code, unless it has been found already.
@@ -679,6 +695,7 @@ pub fn run() {
             hide_window,
             evaluate,
             explain,
+            keep,
             claude_status,
             connect_claude,
             warm_claude,

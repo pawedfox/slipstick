@@ -17,8 +17,8 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.14.0, not yet released; 0.11.0 is the current release
-(2026-11-22), and 0.12.0 and 0.13.0 were never tagged. Work follows
+Version 0.15.0, not yet released; 0.11.0 is the current release
+(2026-11-22), and 0.12.0, 0.13.0 and 0.14.0 were never tagged. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -29,15 +29,21 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   model, so that asking one is a last resort. Models that run on the
   user's own machine are dropped as an aim.
 - Item 1 of the roadmap is hardening the engine, in the slices under
-  "Hardening the engine" in `SPEC.md`. Three are built. In 0.12.0, on
+  "Hardening the engine" in `SPEC.md`. Four are built. In 0.12.0, on
   Enter the app says why it refused an input, where it is certain
   (`why_not` in `calc.rs`; "Saying why" in `SPEC.md`). In 0.13.0, a
   formula with its values after it is answered as typed (`given` in
   `calc.rs`; "Values after a formula" in `SPEC.md`), and Enter on that
   answer has Claude check it. In 0.14.0, an equation with one value left
   out is solved for it (`Form::work_out` and `roots_of` in `calc.rs`;
-  "Solving for an unknown" in `SPEC.md`). Next is the fourth slice, named
-  values that last the session. After the engine come macOS, then one small
+  "Solving for an unknown" in `SPEC.md`). In 0.15.0, Enter on an answer
+  with a name in front keeps it under that name until the app quits, and
+  later inputs may use the name (`keep`, `Kept` and `Session` in
+  `calc.rs`; "Named values that last the session" in `SPEC.md`). Enter on
+  a formula with its values that can be kept keeps it first, and has
+  Claude check it on the second Enter; the user chose that order. Next is
+  the fifth slice, constants and units for science. After
+  the engine come macOS, then one small
   provider-neutral route, then Linux, then a formula library. What was
   found is under "Models other than Claude" and "Other operating systems"
   there.
@@ -153,6 +159,18 @@ Run from the repo root unless noted.
   do not weaken that, and do not let the engine guess a missing unit from
   a name (`R = 10k` is refused, not read as ohms). An answer of this kind
   carries `given`, which is what lets Enter send it to Claude.
+  Values kept for the session (`keep`) are held by the window, in memory
+  only, and handed to the engine with each input (`evaluate_in`,
+  `why_not_in`); the engine keeps nothing between inputs, and checks what
+  it is handed (`Session::of`). Two properties must hold. Input that uses
+  no kept name is read exactly as it was with nothing kept
+  (`keeping_a_value_changes_nothing_that_does_not_use_it`), which is why a
+  word that means something standing alone (a unit, a function) cannot be
+  kept. And a name in front is only ever the answer's name: never read
+  `Vcc = I * R1` as an equation because `Vcc` is kept, or a mistyped name
+  gives a wrong number with no warning. A command that takes typed input
+  takes `kept` too, in `lib.rs`, `src/dev-bridge.ts`, `tools/dev-bridge.mjs`
+  and `solve.rs`.
   An equation is solved by search (`roots_of`), not by algebra. A value it
   returns has been put back into the equation, so it always fits; it may
   not be the only one, and two answers that are not a matching plus and

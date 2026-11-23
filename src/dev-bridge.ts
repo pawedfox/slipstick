@@ -47,8 +47,17 @@ export function installDevBridge() {
   const commands: Record<string, (args: Arguments) => unknown> = {
     set_visible_height: () => null,
     hide_window: () => null,
-    evaluate: (args) => post("/evaluate", { input: args.input, figures: settings.figures }),
-    explain: (args) => post("/explain", { input: args.input }),
+    evaluate: (args) => post("/evaluate", { input: args.input, kept: args.kept, figures: settings.figures }),
+    explain: (args) => post("/explain", { input: args.input, kept: args.kept }),
+    // As the real thing does: the value to keep, null, or a refusal thrown.
+    keep: async (args) => {
+      const reply = (await post("/keep", { input: args.input, kept: args.kept })) as {
+        kept?: unknown;
+        reason?: string;
+      } | null;
+      if (reply?.reason) throw reply.reason;
+      return reply?.kept ?? null;
+    },
     claude_status: () => ({ found: true, connected }),
     connect_claude: () => {
       connected = true;

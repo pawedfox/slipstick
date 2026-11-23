@@ -450,6 +450,12 @@ sub {
   color: var(--soft);
 }
 
+/* One kept value that an answer used. A long line of them breaks between
+   values, never inside one. */
+.used {
+  white-space: nowrap;
+}
+
 .copied {
   font: 12px/1 var(--mono);
   color: var(--accent);

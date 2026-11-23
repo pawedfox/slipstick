@@ -14,9 +14,10 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.14.0, not yet released. The latest release is 0.11.0,
+Status: version 0.15.0, not yet released. The latest release is 0.11.0,
 which does not yet say why it refused an input, take a formula with its
-values after it, or solve for a value left out. It is one person's tool,
+values after it, solve for a value left out, or keep a value under a
+name. It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
@@ -106,6 +107,27 @@ It understands:
   both. A value it shows always fits the equation, but it searches for
   answers and can miss one, so "no value was found" does not mean there
   is none. `x` is the times sign, so call the value something else.
+- **Values you keep.** Press **Enter** on an answer with a name in front
+  and it is kept under that name until you quit Slipstick. Later inputs
+  can use the name:
+
+  | You type | It shows |
+  |---|---|
+  | `R1 = 10kohm`, then Enter | 10.00 kΩ, and "R1 is kept until Slipstick is quit." |
+  | `R2 = 22kohm`, then Enter | 22.00 kΩ, kept likewise |
+  | `Vcc = 9V`, then Enter | 9.000 V, kept likewise |
+  | `Vcc * R2 / (R1 + R2)` | 6.188 V |
+  | `R1 \|\| R2` | 6.875 kΩ |
+  | `12V = I * R1` | 1.200 mA |
+
+  An answer that used kept values lists them on a line beneath it
+  (`Vcc = 9.000 V, R2 = 22.00 kΩ, R1 = 10.00 kΩ`), so a value kept some
+  time ago is never used unseen. A name holds the number it had when you
+  kept it: keep `R2 = R1 * 2`, then change R1, and R2 stays as it was. A
+  name cannot be a unit (`V`, `C`, `m`), because `V * 2` already means two
+  volts; use `V1` or `Vin`. Straight after a number a word is still a unit
+  or a prefix, so with `k` kept, `2k` is two thousand and twice k is
+  `2 * k`. Kept values are held in memory only.
 
 It is strict on purpose. Anything it is not sure of gets no instant answer,
 never a guess. Press **Enter** on something it refused and, where it knows
@@ -151,7 +173,10 @@ reason for refusing it, press Enter again to send it all the same.)
   A formula typed with its values after it, or an equation with one value
   left out, is answered at once, exactly as typed, before Claude has seen
   it. Press Enter on that answer and, with Claude connected, Claude checks
-  it and flags it if it is wrong.
+  it and flags it if it is wrong. Where the answer has a name in front
+  that can be kept, the first Enter keeps it and the second has Claude
+  check it. Claude is not told the values you have kept, so an answer
+  that used one is not sent to be checked.
 
 - **Pictures.** Paste a screenshot of a formula, a datasheet row or a small
   schematic, up to four at once, with or without words.
@@ -229,8 +254,8 @@ Open with the gear, **Ctrl+,** or the tray menu.
   window position, your settings, and whether Claude is connected) and a
   copy of its instructions for Claude Code to read. It keeps no history and
   no log of problems or answers, and the app itself sends no usage data to
-  anyone. Recalled inputs are held in memory and are gone when the app
-  quits.
+  anyone. Recalled inputs, and the values you keep under a name, are held
+  in memory and are gone when the app quits.
 - Claude Code is started with its own session saving switched off and with
   all its tools switched off, so it can only reply with text.
 
@@ -265,6 +290,8 @@ decided and why, and what has and has not been tested.
 - The installer is not signed.
 - A way to use Claude without Claude Code installed.
 - Memory of your notation and preferences.
+- A list of the values you have kept, and a way to forget one without
+  quitting.
 - Not tested: Windows 10, and displays scaled above 125%.
 - Answers from Claude are checked against a set of 46 reference problems.
   The instructions given to Claude were tuned on that same set, so passing

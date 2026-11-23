@@ -9,7 +9,7 @@
 //! `None`, and the input is left for Claude. It never guesses: a wrong number
 //! shown instantly would be worse than no number.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// How many significant figures answers are shown to, unless the user has
 /// chosen otherwise.
@@ -157,12 +157,38 @@ pub struct Answer {
     /// checked.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub given: bool,
+    /// The values kept for the session that the answer used, as the window
+    /// shows them beneath it: `Vcc = 9.000 V, R1 = 10.00 kΩ`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uses: Option<String>,
 }
 
 impl Answer {
     fn real(number: String, unit: String, copy: String) -> Self {
-        Self { number, unit, copy, angle: None, parts: None, given: false }
+        Self { number, unit, copy, angle: None, parts: None, given: false, uses: None }
     }
+}
+
+/// A value kept under a name for the session: `R1 = 10kohm`, then `R1` in
+/// what follows. The window holds these, in memory only, and hands them
+/// back with each input; the engine itself keeps nothing between inputs.
+///
+/// It holds the number the name had when it was kept, not the formula, so
+/// keeping another value under a name it was worked out from changes
+/// nothing.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Kept {
+    pub name: String,
+    /// In SI base units, as a `Quantity` holds it.
+    value: f64,
+    #[serde(default)]
+    im: f64,
+    dim: Dim,
+    #[serde(default)]
+    reading: Option<Scale>,
+    /// What the units it was typed in say about how to show an answer.
+    #[serde(default)]
+    hints: Hints,
 }
 
 // ---- units ------------------------------------------------------------------
@@ -1376,7 +1402,7 @@ fn conversion_split(tokens: &[Token]) -> Option<usize> {
 
 // ---- temperature ------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum Scale {
     Celsius,
     Fahrenheit,
@@ -1845,13 +1871,20 @@ struct Outcome {
     /// in kelvin; this keeps it as a reading on its scale.
     raw: Quantity,
     hints: Hints,
+    /// The answer was asked for in a unit of another kind than the result
+    /// (`1500 rpm to Hz`), so `raw` is not the quantity that is shown.
+    crossed: bool,
+    /// The values kept for the session that were used, in the order they
+    /// first appear.
+    used: Vec<String>,
 }
 
 /// What the units typed say about an input. It is carried from the values
 /// given after a formula to the formula itself, where it decides how the
 /// answer is shown: millijoules or newton metres, hertz or per second,
 /// °C or °F.
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
 struct Hints {
     electrical: bool,
     mechanical: bool,
@@ -1980,6 +2013,12 @@ enum Why {
     /// Several values do, and they are not one value with either sign.
     /// With the name, the values as they would be shown.
     ManyRoots(String, String),
+    /// A value cannot be kept under a name that is a unit: `V = 12V`.
+    NameIsUnit(String),
+    /// An answer that has a name in front but is not a value that can be
+    /// kept under it: a level in decibels, a percentage, the value found
+    /// by solving an equation.
+    CannotKeep,
 }
 
 /// The kinds of quantity the engine has a name for, each with its article.
@@ -2092,6 +2131,10 @@ impl Why {
             Why::NoKind(name) => format!("No kind of quantity for {name} makes the two sides agree."),
             Why::NoRoot(name) => format!("No value of {name} was found that makes the two sides equal."),
             Why::ManyRoots(name, values) => format!("More than one value of {name} fits: {values}."),
+            Why::NameIsUnit(name) => {
+                format!("{name} is a unit, so it cannot be kept. Use a name such as {name}1.")
+            }
+            Why::CannotKeep => "That answer cannot be kept under a name.".into(),
             Why::UnitOrName(name) => format!(
                 "{name} could be a unit or the value you named {name}. Give the value another name, such as {name}_1."
             ),
@@ -2198,15 +2241,24 @@ fn why_reading(
 /// is certain. Returns nothing for input that is answered, for input in
 /// words, and whenever the reason is not known or the readings disagree.
 pub fn why_not(input: &str) -> Option<String> {
-    let text = input.trim().trim_end_matches('=').trim_end();
-    if text.is_empty() || text.chars().count() > 400 || evaluate(input).is_some() {
+    why_not_in(input, &[])
+}
+
+/// As `why_not`, with the values kept for the session.
+pub fn why_not_in(input: &str, kept: &[Kept]) -> Option<String> {
+    let whole = typed(input)?;
+    if evaluate_in(input, kept).is_some() {
         return None;
     }
-    if let Some(result) = given(text) {
+    let session = Session::of(kept);
+    if let Some(result) = given(whole, &session) {
         return result.err().flatten().map(|why| why.say());
     }
-    let (labelled, text) = without_label(text);
-    let tokens = lex(text, &[])?;
+    let (labelled, text) = without_label(whole);
+    let tokens = lex(text, &session.names)?;
+    if session.used_in(&tokens) {
+        return given_parts(whole, &[], &session).err().flatten().map(|why| why.say());
+    }
     if tokens.is_empty() || !all_maths(&tokens) {
         return None;
     }
@@ -2294,6 +2346,13 @@ fn is_unit_word(word: &str) -> bool {
     lookup(word).is_some() || temperature_scale(word).is_some()
 }
 
+/// Whether a word is a unit when it stands alone, as `V` is in `V * 2`. A
+/// prefix is not: `k` alone means nothing, so a value may be called `k`
+/// with no doubt about which is meant.
+fn is_unit_alone(word: &str) -> bool {
+    is_dimensioned_unit(word) || temperature_scale(word).is_some()
+}
+
 /// A word that could be read as a unit or as a value the user named.
 ///
 /// Straight after a number a word is always a unit, so `9.81 m` is metres
@@ -2321,7 +2380,7 @@ fn unit_or_name(tokens: &[Token], finding: Option<&str>) -> Option<String> {
             }
             (Token::Slash | Token::Star, Some(Token::Word(_))) if in_units => at += 2,
             (Token::Slash | Token::Star, Some(Token::Name(name)))
-                if in_units && is_unit_word(name) && finding != Some(name.as_str()) =>
+                if in_units && is_unit_alone(name) && finding != Some(name.as_str()) =>
             {
                 return Some(name.clone());
             }
@@ -2395,11 +2454,34 @@ struct Form<'a> {
     equation: bool,
     /// Names with a digit in them, given or not.
     numbered: Vec<&'a str>,
+    /// The values kept for the session. One given here under the same
+    /// name takes its place.
+    session: &'a Session,
 }
 
 impl Form<'_> {
     fn sides(&self) -> usize {
         if self.equation { 2 } else { 1 }
+    }
+
+    /// Whether a name is a kept value here: kept, and not given again
+    /// after the formula.
+    fn is_kept(&self, name: &str) -> bool {
+        self.session.has(name) && !self.values.iter().any(|(given, _)| *given == name)
+    }
+
+    /// The kept values these tokens use, in the order they first appear.
+    fn kept_used(&self, parts: &[Vec<Token>]) -> Vec<String> {
+        let mut used: Vec<String> = Vec::new();
+        for token in parts.iter().flatten() {
+            if let Token::Name(name) = token
+                && self.is_kept(name)
+                && !used.contains(name)
+            {
+                used.push(name.clone());
+            }
+        }
+        used
     }
 
     /// Every part as tokens. `finding` is the value an equation is being
@@ -2416,6 +2498,7 @@ impl Form<'_> {
                     .map(|(name, _)| *name)
                     .chain(self.numbered.iter().copied())
                     .chain(finding)
+                    .chain(self.session.names.iter().map(|(name, _)| name.as_str()))
                     .filter(|name| name != own)
                     .map(|name| (name.to_string(), Quantity::plain(1.0)))
                     .collect();
@@ -2432,6 +2515,12 @@ impl Form<'_> {
     /// find; with none, the equation is only checked for having nothing
     /// left to find.
     fn work_out(&self, finding: Option<&str>) -> Result<Outcome, Option<Why>> {
+        let mut outcome = self.worked(finding)?;
+        outcome.used = self.kept_used(&self.lex(finding)?);
+        Ok(outcome)
+    }
+
+    fn worked(&self, finding: Option<&str>) -> Result<Outcome, Option<Why>> {
         let mut parts = self.lex(finding)?;
         let sides = self.sides();
 
@@ -2470,9 +2559,17 @@ impl Form<'_> {
 
         // The values, each as soon as the values it uses are known. Those
         // that need the value being found wait, and are worked out with
-        // each trial.
-        let mut known: Vec<(String, Quantity)> = Vec::new();
+        // each trial. The values kept for the session are known from the
+        // start, and the units they were typed in count as the units of
+        // the values given here do.
+        let mut known: Vec<(String, Quantity)> =
+            self.session.names.iter().filter(|(name, _)| self.is_kept(name)).cloned().collect();
         let mut carried = flags.clone();
+        for name in self.kept_used(&parts) {
+            if let Some(hints) = self.session.hints_of(&name) {
+                carried.add(hints);
+            }
+        }
         let mut waiting: Vec<(&str, Vec<Token>)> =
             self.values.iter().map(|(name, _)| *name).zip(parts.split_off(sides)).collect();
         let ready = |tokens: &[Token], known: &[(String, Quantity)]| {
@@ -2608,12 +2705,15 @@ impl Form<'_> {
 /// one value left to find. Returns nothing if the input is not of that
 /// form. Otherwise the answer, or a refusal with the reason where that is
 /// certain.
-fn given(text: &str) -> Option<Result<Outcome, Option<Why>>> {
+fn given(text: &str, session: &Session) -> Option<Result<Outcome, Option<Why>>> {
     let (formula, values) = split_given(text)?;
-    Some(given_parts(formula, &values))
+    Some(given_parts(formula, &values, session))
 }
 
-fn given_parts(formula: &str, values: &[(&str, &str)]) -> Result<Outcome, Option<Why>> {
+/// As `given`, for a formula and its values already split apart. With no
+/// values, it is how maths that uses a value kept for the session is read:
+/// as a formula whose values were given earlier.
+fn given_parts(formula: &str, values: &[(&str, &str)], session: &Session) -> Result<Outcome, Option<Why>> {
     for (index, (name, _)) in values.iter().enumerate() {
         // A function, a constant, a keyword or the times sign cannot also
         // name a value.
@@ -2639,7 +2739,7 @@ fn given_parts(formula: &str, values: &[(&str, &str)]) -> Result<Outcome, Option
     let texts: Vec<(&str, &str)> =
         left.map(|left| ("", left)).into_iter().chain([("", right)]).chain(values.iter().copied()).collect();
     let numbered: Vec<&str> = texts.iter().flat_map(|(_, text)| numbered_names(text)).collect();
-    let form = Form { texts, values, equation: left.is_some(), numbered };
+    let form = Form { texts, values, equation: left.is_some(), numbered, session };
     let parts = form.lex(None)?;
 
     // Words nothing knows. In an equation one of them is the value to
@@ -2664,7 +2764,7 @@ fn given_parts(formula: &str, values: &[(&str, &str)]) -> Result<Outcome, Option
                 _ => false,
             };
             let (list, word) = match token {
-                Token::Name(name) if !is_given(name) => (&mut strange, name.as_str()),
+                Token::Name(name) if !is_given(name) && !session.has(name) => (&mut strange, name.as_str()),
                 Token::Word(word) if !all_maths(std::slice::from_ref(token)) => (&mut strange, word.as_str()),
                 Token::Word(word)
                     if !after_number && is_unit_word(word) && !matches!(word.as_str(), "to" | "in") =>
@@ -2679,7 +2779,8 @@ fn given_parts(formula: &str, values: &[(&str, &str)]) -> Result<Outcome, Option
         }
     }
 
-    let names: Vec<&str> = values.iter().map(|(name, _)| *name).collect();
+    let names: Vec<&str> =
+        values.iter().map(|(name, _)| *name).chain(session.names.iter().map(|(name, _)| name.as_str())).collect();
     if let [word] = strange[..]
         && let Some(pieces) = run_together(word, &names)
     {
@@ -2899,6 +3000,8 @@ fn attempt_noting(
             raw: result,
             hints: Hints::of(&parser),
             bare_text: parser.bare_text.take(),
+            crossed: false,
+            used: Vec::new(),
         });
     }
     if !in_program && !parser.interesting && wanted.is_none() {
@@ -3002,6 +3105,11 @@ fn attempt_noting(
         raw: result,
         hints: Hints::of(&parser),
         bare_text: parser.bare_text.take(),
+        // A temperature asked for on a scale stays the same temperature
+        // only if it was a reading to begin with.
+        crossed: target.as_ref().is_some_and(|target| target.dim != result.dim)
+            || (to_scale.is_some() && result.reading.is_none()),
+        used: Vec::new(),
     })
 }
 
@@ -3133,24 +3241,55 @@ fn without_label(text: &str) -> (bool, &str) {
 /// that is incomplete, ambiguous, dimensionally inconsistent, or just a bare
 /// number.
 pub fn evaluate(input: &str) -> Option<Answer> {
-    evaluate_with_value(input).map(|(answer, _)| answer)
+    evaluate_in(input, &[])
+}
+
+/// As `evaluate`, with the values kept for the session, which the input
+/// may use by name.
+pub fn evaluate_in(input: &str, kept: &[Kept]) -> Option<Answer> {
+    evaluate_with_value_in(input, kept).map(|(answer, _)| answer)
 }
 
 /// As `evaluate`, and also gives the value in SI base units (kelvin for a
 /// temperature). Used to check answers against the reference set.
 pub fn evaluate_with_value(input: &str) -> Option<(Answer, f64)> {
+    evaluate_with_value_in(input, &[])
+}
+
+/// The input as the engine reads it: trimmed, and without an `=` left on
+/// the end. Nothing for empty input, or for more than it will look at.
+fn typed(input: &str) -> Option<&str> {
     let text = input.trim().trim_end_matches('=').trim_end();
-    if text.is_empty() || text.chars().count() > 400 {
-        return None;
-    }
+    (!text.is_empty() && text.chars().count() <= 400).then_some(text)
+}
+
+pub fn evaluate_with_value_in(input: &str, kept: &[Kept]) -> Option<(Answer, f64)> {
+    let whole = typed(input)?;
+    let session = Session::of(kept);
+    // The answer to a formula, with the kept values it used beneath it.
+    // Such an answer is offered to Claude to check (`given`) only when it
+    // used none: Claude is not told the kept values.
+    let finished = |outcome: Outcome, given: bool, lone: bool| {
+        let answer = Answer {
+            given: given && outcome.used.is_empty(),
+            uses: session.say_all(&outcome.used).filter(|_| !lone),
+            ..outcome.answer
+        };
+        (answer, outcome.quantity.magnitude_or_value())
+    };
     // A formula with its values after it. A comma means nothing else.
-    if let Some(result) = given(text) {
-        return result.ok().map(|outcome| {
-            (Answer { given: true, ..outcome.answer }, outcome.quantity.magnitude_or_value())
-        });
+    if let Some(result) = given(whole, &session) {
+        return result.ok().map(|outcome| finished(outcome, true, false));
     }
-    let (labelled, text) = without_label(text);
-    let tokens = lex(text, &[])?;
+    let (labelled, text) = without_label(whole);
+    let tokens = lex(text, &session.names)?;
+    // Maths that uses a kept value is read as a formula whose values were
+    // given earlier. A kept name alone shows its value, with nothing
+    // beneath: the line would only say the same again.
+    if session.used_in(&tokens) {
+        let lone = matches!(tokens[..], [Token::Name(_)]);
+        return given_parts(whole, &[], &session).ok().map(|outcome| finished(outcome, false, lone));
+    }
     if let Some(found) = temperature(&tokens) {
         return Some(found);
     }
@@ -3218,6 +3357,209 @@ fn reading_with(
             _ => None,
         },
     }
+}
+
+// ---- values kept for the session ----------------------------------------------
+//
+// `R1 = 10kohm`, kept with Enter, and then `R1` in what follows. The window
+// holds what is kept and hands it back with each input (`Kept`).
+//
+// Nothing that was answered before may change because a value is kept. So
+// a name cannot be kept if the word already means something standing
+// alone, as `V` does in `V * 2`, and input that uses no kept name is read
+// exactly as it always was.
+
+/// The values kept for the session, checked and ready for the parser.
+#[derive(Default)]
+struct Session {
+    names: Vec<(String, Quantity)>,
+    /// What the units of each were, in the same order as `names`.
+    hints: Vec<Hints>,
+}
+
+impl Session {
+    /// What the window handed back is checked like any other input. An
+    /// entry that could not have come from `keep` is left out.
+    fn of(kept: &[Kept]) -> Self {
+        let mut session = Session::default();
+        for entry in kept {
+            let sound = keepable_name(&entry.name).is_ok()
+                && entry.value.is_finite()
+                && entry.im.is_finite()
+                && (entry.reading.is_none() || (entry.dim == TEMPERATURE && entry.im == 0.0))
+                && entry.hints.typed.iter().all(|(index, _)| *index < UNITS.len());
+            if !sound {
+                continue;
+            }
+            // Kept again under the same name, the later one stands.
+            if let Some(at) = session.names.iter().position(|(name, _)| *name == entry.name) {
+                session.names.remove(at);
+                session.hints.remove(at);
+            }
+            let quantity = Quantity {
+                value: entry.value,
+                dim: entry.dim,
+                percent: false,
+                reading: entry.reading,
+                im: entry.im,
+            };
+            session.names.push((entry.name.clone(), quantity));
+            session.hints.push(entry.hints.clone());
+        }
+        session
+    }
+
+    fn has(&self, name: &str) -> bool {
+        self.names.iter().any(|(known, _)| known == name)
+    }
+
+    fn hints_of(&self, name: &str) -> Option<&Hints> {
+        self.names.iter().position(|(known, _)| known == name).map(|at| &self.hints[at])
+    }
+
+    /// Whether these tokens use a kept value.
+    fn used_in(&self, tokens: &[Token]) -> bool {
+        tokens.iter().any(|token| matches!(token, Token::Name(name) if self.has(name)))
+    }
+
+    /// A kept value as it is shown beneath an answer that used it:
+    /// `10.00 kΩ`.
+    fn say(&self, name: &str) -> Option<String> {
+        let at = self.names.iter().position(|(known, _)| known == name)?;
+        let quantity = self.names[at].1;
+        let names = [(name.to_string(), quantity)];
+        let part = Part { names: &names, hints: &self.hints[at], value_only: false };
+        let shown = match reading_named(&[Token::Name(name.to_string())], None, false, &part) {
+            Some(outcome) => outcome.answer,
+            // A unit with no name of its own is given in SI base units and
+            // labelled as such, as it is for a step of a program.
+            None => shown_as_is(quantity.magnitude_or_value(), if quantity.dim == NO_DIM { "" } else { "(SI)" }),
+        };
+        let value = format!("{} {}", shown.number, shown.unit);
+        Some(match shown.angle {
+            Some(angle) => format!("{} ∠ {angle}", value.trim_end()),
+            None => value.trim_end().to_string(),
+        })
+    }
+
+    /// The line beneath an answer: `Vcc = 9.000 V, R1 = 10.00 kΩ`.
+    fn say_all(&self, used: &[String]) -> Option<String> {
+        let said: Vec<String> =
+            used.iter().filter_map(|name| Some(format!("{name} = {}", self.say(name)?))).collect();
+        (!said.is_empty()).then(|| said.join(", "))
+    }
+}
+
+/// Whether a value may be kept under this name. Not under a word that
+/// already means something standing alone, or what was answered before
+/// would change: a unit (`V * 2` is two volts), a level in decibels, a
+/// function or a constant. A prefix alone means nothing, so `k`, `f` and
+/// `T` are names like any other.
+fn keepable_name(name: &str) -> Result<(), Why> {
+    if !is_valid_name(name) || is_complex_function(name) || matches!(name, "j" | "π") {
+        return Err(Why::NameTaken(name.to_string()));
+    }
+    if is_unit_alone(name) || level(name).is_some() || is_gain(name) {
+        return Err(Why::NameIsUnit(name.to_string()));
+    }
+    Ok(())
+}
+
+/// Keeps the answer to typed input under the name in front of it, for the
+/// rest of the session. This is what Enter does on `R1 = 10kohm`.
+///
+/// Returns the value to keep. Otherwise a reason, where the input has a
+/// name in front and an answer that cannot be kept under it; or nothing,
+/// where the input is not of this kind at all and Enter means what it
+/// always did.
+///
+/// What is kept is the value, not the formula: `R2 = R1 * 2` keeps the
+/// number R2 has now. A value need not be one the window could show: a
+/// bare number (`beta = 200`) or a unit with no name (`k = 2 mA/V^2`).
+pub fn keep(input: &str, kept: &[Kept]) -> Result<Kept, Option<String>> {
+    let whole = typed(input).ok_or(None)?;
+    let session = Session::of(kept);
+    let (formula, values) = split_given(whole).unwrap_or((whole, Vec::new()));
+    let (name, right) = formula.split_once('=').ok_or(None)?;
+    let (name, right) = (name.trim(), right.trim());
+    if !is_label(name) || right.is_empty() {
+        return Err(None);
+    }
+    // With an answer on screen and nothing to keep, Enter says so.
+    let answered = evaluate_in(input, kept).is_some();
+    let cannot = || answered.then(|| Why::CannotKeep.say());
+
+    // A name that is also given a value after the formula makes it an
+    // equation, and the value found is not that name's.
+    if values.iter().any(|(given, _)| *given == name) {
+        return Err(cannot());
+    }
+    let (quantity, hints) = kept_value(formula, right, &values, &session, answered).ok_or_else(cannot)?;
+    // A name with a tag in brackets (`VGS(off)`) is a label and no more.
+    let chars: Vec<char> = name.chars().collect();
+    if identifier_end(&chars, 0) != Some(chars.len()) {
+        return Err(Some(Why::CannotKeep.say()));
+    }
+    keepable_name(name).map_err(|why| Some(why.say()))?;
+    Ok(Kept {
+        name: name.to_string(),
+        value: quantity.value,
+        im: quantity.im,
+        dim: quantity.dim,
+        reading: quantity.reading,
+        hints,
+    })
+}
+
+/// The value a named input comes to, with what its units say, if it is one
+/// that can be kept.
+fn kept_value(
+    formula: &str,
+    right: &str,
+    values: &[(&str, &str)],
+    session: &Session,
+    answered: bool,
+) -> Option<(Quantity, Hints)> {
+    let keepable =
+        |outcome: Outcome| (!outcome.raw.percent && !outcome.crossed).then_some((outcome.raw, outcome.hints));
+    // A formula with its values after it: the answer it gave.
+    if !values.is_empty() {
+        return given_parts(formula, values, session).ok().and_then(keepable);
+    }
+
+    let tokens = lex(right, &session.names)?;
+    if unit_or_name(&tokens, None).is_some() {
+        return None;
+    }
+    let mut hints = Hints::default();
+    for token in &tokens {
+        if let Token::Name(name) = token
+            && let Some(kept) = session.hints_of(name)
+        {
+            hints.add(kept);
+        }
+    }
+    // Read as a value, so that it need not be one the window could show.
+    // It is named, so a prefix with no unit is refused.
+    let split = conversion_split(&tokens);
+    let expression = split.map_or(&tokens[..], |at| &tokens[..at]);
+    let part = Part { names: &session.names, hints: &hints, value_only: true };
+    let outcome = reading_named(expression, None, true, &part)?;
+    if let Some(at) = split {
+        // Asked for in a unit. It is the same quantity only where the
+        // unit is of its own kind, or a temperature is put on another
+        // scale.
+        let wanted = &tokens[at + 1..];
+        let same_kind = match wanted {
+            [Token::Word(word)] if outcome.raw.reading.is_some() && temperature_scale(word).is_some() => true,
+            _ => outcome.raw.reading.is_none() && parse_target(wanted).is_some_and(|target| target.dim == outcome.raw.dim),
+        };
+        // And only where the conversion was answered.
+        if !same_kind || !answered {
+            return None;
+        }
+    }
+    keepable(outcome)
 }
 
 // ---- programs ---------------------------------------------------------------
@@ -4099,6 +4441,271 @@ mod tests {
         check("V = 12V", "12.00 V");
         why("re = 25mV / Ic, Ib = 2mA", "Ic is not given a value.");
         why("Vth = Vcc * R2 / (R1 + R2), Vcc = 9V, R1 = 100kohm", "R2 is not given a value.");
+    }
+
+    /// A session: each line is typed and given Enter, which keeps it.
+    #[track_caller]
+    fn session(lines: &[&str]) -> Vec<Kept> {
+        let mut kept: Vec<Kept> = Vec::new();
+        for line in lines {
+            let entry = keep(line, &kept).unwrap_or_else(|why| panic!("{line:?} was not kept: {why:?}"));
+            // As the window does: kept again, a name's old value goes.
+            kept.retain(|earlier| earlier.name != entry.name);
+            kept.push(entry);
+        }
+        kept
+    }
+
+    fn show_in(kept: &[Kept], input: &str) -> Option<String> {
+        evaluate_in(input, kept).map(|a| format!("{} {}", a.number, a.unit).trim_end().to_string())
+    }
+
+    /// The answer with these values kept, and the line beneath it that
+    /// says which of them it used.
+    #[track_caller]
+    fn check_in(kept: &[Kept], input: &str, expected: &str, uses: Option<&str>) {
+        let answer = evaluate_in(input, kept).unwrap_or_else(|| panic!("no answer for {input:?}"));
+        let shown = format!("{} {}", answer.number, answer.unit);
+        assert_eq!(shown.trim_end(), expected, "for {input:?}");
+        assert_eq!(answer.uses.as_deref(), uses, "for {input:?}");
+    }
+
+    #[track_caller]
+    fn why_in(kept: &[Kept], input: &str, expected: &str) {
+        assert_eq!(show_in(kept, input), None, "should not answer {input:?}");
+        assert_eq!(why_not_in(input, kept).as_deref(), Some(expected), "for {input:?}");
+    }
+
+    /// Enter on this keeps nothing, and says why.
+    #[track_caller]
+    fn not_kept(kept: &[Kept], input: &str, expected: &str) {
+        assert_eq!(keep(input, kept).err().flatten().as_deref(), Some(expected), "for {input:?}");
+    }
+
+    /// Enter on this keeps nothing and says nothing: it means what it did
+    /// before values could be kept.
+    #[track_caller]
+    fn not_for_keeping(kept: &[Kept], input: &str) {
+        assert!(matches!(keep(input, kept), Err(None)), "for {input:?}");
+    }
+
+    #[test]
+    fn a_value_kept_for_the_session() {
+        let kept = session(&["R1 = 10kohm", "R2 = 22kohm", "Vcc = 9V"]);
+        check_in(&kept, "Vcc * R2 / (R1 + R2)", "6.188 V", Some("Vcc = 9.000 V, R2 = 22.00 kΩ, R1 = 10.00 kΩ"));
+        check_in(&kept, "R1 || R2", "6.875 kΩ", Some("R1 = 10.00 kΩ, R2 = 22.00 kΩ"));
+        check_in(&kept, "Vout = Vcc * R2 / (R1 + R2)", "6.188 V", Some("Vcc = 9.000 V, R2 = 22.00 kΩ, R1 = 10.00 kΩ"));
+        check_in(&kept, "R1 * 2 to ohm", "20000 Ω", Some("R1 = 10.00 kΩ"));
+        // A kept name alone shows its value, with nothing beneath.
+        check_in(&kept, "R1", "10.00 kΩ", None);
+        check_in(&kept, "R = R1", "10.00 kΩ", None);
+        // Straight after a number a word is a unit or a prefix, as ever.
+        let kept = session(&["k = 5", "f = 1kHz", "T = 20 ms", "G = 100", "n = 4"]);
+        check_in(&kept, "2k", "2.000 k", None);
+        check_in(&kept, "2 * k", "10.00", Some("k = 5.000"));
+        check_in(&kept, "2 * pi * f * 10mH", "62.83 Ω", Some("f = 1.000 kHz"));
+        check_in(&kept, "10mH * 2 * pi * f", "62.83 Ω", Some("f = 1.000 kHz"));
+        check_in(&kept, "1 / T", "50.00 Hz", Some("T = 20.00 ms"));
+        check_in(&kept, "G * n", "400.0", Some("G = 100.0, n = 4.000"));
+        // Names with an underscore.
+        let kept = session(&["V_th = 1V", "I_D = 2mA"]);
+        check_in(&kept, "V_th / I_D", "500.0 Ω", Some("V_th = 1.000 V, I_D = 2.000 mA"));
+    }
+
+    #[test]
+    fn a_kept_value_holds_its_number_not_its_formula() {
+        let kept = session(&["R1 = 10kohm", "R2 = R1 * 2", "R1 = 22kohm"]);
+        check_in(&kept, "R2", "20.00 kΩ", None);
+        check_in(&kept, "R1", "22.00 kΩ", None);
+        // A name may be kept again from its own value.
+        let kept = session(&["R1 = 10kohm", "R1 = R1 * 2"]);
+        check_in(&kept, "R1", "20.00 kΩ", None);
+        // The name in front is only a name: it is not the kept value, and
+        // the input is not an equation.
+        check_in(&kept, "R1 = 4.7kohm", "4.700 kΩ", None);
+        check_in(&kept, "R1 = R1 + 1kohm", "21.00 kΩ", Some("R1 = 20.00 kΩ"));
+    }
+
+    #[test]
+    fn what_a_kept_value_may_be() {
+        // A bare number, and a unit with no name of its own: neither is
+        // shown by itself, and both can be kept and used.
+        let kept = session(&["beta = 200", "kn = 2 mA/V^2"]);
+        check_in(&kept, "beta", "200.0", None);
+        check_in(&kept, "beta * 10uA", "2.000 mA", Some("beta = 200.0"));
+        check_in(&kept, "0.5 * kn * (2.5V - 1V)^2", "2.250 mA", Some("kn = 0.002000 (SI)"));
+        assert_eq!(show_in(&kept, "kn"), None);
+        // The units a value was typed in decide how answers are shown, as
+        // they would if it were typed in place.
+        let kept = session(&["E1 = 0.5 * 100uF * (12V)^2", "p1 = 3 bar", "Ta = 25 C", "tau = 10kohm * 100nF"]);
+        check_in(&kept, "E1 * 2", "14.40 mJ", Some("E1 = 7.200 mJ"));
+        check_in(&kept, "p1 * 2", "6.000 bar", Some("p1 = 3.000 bar"));
+        check_in(&kept, "Ta + 2 W * 50 C/W", "125.0 °C", Some("Ta = 25.00 °C"));
+        check_in(&kept, "1/(2*pi*tau)", "159.2 Hz", Some("tau = 1.000 ms"));
+        check_in(&kept, "1/tau", "1000 s⁻¹", Some("tau = 1.000 ms"));
+        why_in(&kept, "Ta * 2", "A temperature cannot be multiplied or divided. A difference in K can.");
+        // A complex value.
+        let kept = session(&["Z1 = 10kohm + 1/(j*2*pi*1kHz*100nF)"]);
+        let answer = evaluate_in("Z1 * 2", &kept).unwrap();
+        assert_eq!((answer.number.as_str(), answer.angle.as_deref()), ("20.25", Some("−9.043°")));
+        assert_eq!(answer.uses.as_deref(), Some("Z1 = 10.13 kΩ ∠ −9.043°"));
+        check_in(&kept, "abs(Z1)", "10.13 kΩ", Some("Z1 = 10.13 kΩ ∠ −9.043°"));
+        // The answer to a formula with its values, and a unit asked for of
+        // the value's own kind.
+        let kept = session(&["R = V / I, V = 12V, I = 1.5A", "d1 = 2 in to mm", "T1 = 100 C to F"]);
+        check_in(&kept, "R", "8.000 Ω", None);
+        check_in(&kept, "d1 * 2 to mm", "101.6 mm", Some("d1 = 2.000 in"));
+        check_in(&kept, "T1 + 10 K", "110.0 °C", Some("T1 = 100.0 °C"));
+    }
+
+    #[test]
+    fn what_cannot_be_kept() {
+        // A word that already means something standing alone, or what was
+        // answered before would change.
+        not_kept(&[], "V = 12V", "V is a unit, so it cannot be kept. Use a name such as V1.");
+        not_kept(&[], "C = 100nF", "C is a unit, so it cannot be kept. Use a name such as C1.");
+        not_kept(&[], "m = 5 kg", "m is a unit, so it cannot be kept. Use a name such as m1.");
+        not_kept(&[], "K = 300 K", "K is a unit, so it cannot be kept. Use a name such as K1.");
+        not_kept(&[], "mA = 2", "mA is a unit, so it cannot be kept. Use a name such as mA1.");
+        not_kept(&[], "dB = 3", "dB is a unit, so it cannot be kept. Use a name such as dB1.");
+        not_kept(&[], "e = 5V", "e already means something here, so it cannot name a value.");
+        not_kept(&[], "re = 25mV / Ic, Ic = 2mA", "re already means something here, so it cannot name a value.");
+        not_kept(&[], "x = 3", "x is the times sign here, so it cannot name a value. Use another letter.");
+        check("V * 2", "2.000 V");
+        // An answer that is not a value: a level, a percentage, a unit
+        // asked for of another kind, the value an equation was solved for.
+        for input in [
+            "L1 = 250mW in dBm",
+            "P1 = 10 dBm",
+            "gain = 15%",
+            "f1 = 1500 rpm to Hz",
+            "T2 = 300 K to C",
+            "V = I * R, V = 12V, I = 1.5A",
+            "VGS(off) = -2.5V",
+        ] {
+            assert!(evaluate(input).is_some(), "{input:?} should be answered");
+            not_kept(&[], input, "That answer cannot be kept under a name.");
+        }
+        // Input with no name in front, or with no value to it, is not for
+        // keeping, and Enter means what it did.
+        for input in [
+            "10kohm",
+            "12V / 8ohm",
+            "12V = I * 8ohm",
+            "R1 = 10k",
+            "R1 = 10kohm +",
+            "R1 = 10kohm to V",
+            "V1 = 5V + 3mA",
+            "Rx = R1 * 2",
+            "gain = high",
+            "R1 = 10k on top, R2 = 4.7k to ground",
+            "",
+        ] {
+            not_for_keeping(&[], input);
+        }
+        // The reason for those is the one the input always had.
+        why("R1 = 10k", "10k has a prefix but no unit.");
+    }
+
+    #[test]
+    fn kept_values_in_formulas_and_equations() {
+        let kept = session(&["R1 = 10kohm", "R2 = 22kohm", "Vcc = 9V"]);
+        // A value given after the formula takes the place of a kept one of
+        // the same name, for that input.
+        check_in(&kept, "Vth = Vcc * R2 / (R1 + R2), Vcc = 5V", "3.438 V", Some("R2 = 22.00 kΩ, R1 = 10.00 kΩ"));
+        check_in(&kept, "fc = 1/(2*pi*R*C), R = R1, C = 100nF", "159.2 Hz", Some("R1 = 10.00 kΩ"));
+        // A value given after the formula must still be used. A kept one
+        // need not be.
+        why_in(&kept, "Vth = Vcc / 2, R1 = 1kohm", "R1 is given a value but not used.");
+        // One word nothing knows is the value to find, in an equation.
+        check_in(&kept, "12V = I * R1", "1.200 mA", Some("R1 = 10.00 kΩ"));
+        check_in(&kept, "I * R1 = Vcc", "900.0 µA", Some("R1 = 10.00 kΩ, Vcc = 9.000 V"));
+        why_in(&kept, "Vcc - 4V = R1 * 0.5 mA", "Every value is given, so there is nothing to solve for.");
+        // A name in front is the answer's name even where a value is kept
+        // under it. So this is a formula, worked out as one, and the next
+        // a formula with a value missing, not an equation to solve.
+        check_in(&kept, "Vcc = R1 * 0.5 mA + 4V", "9.000 V", Some("R1 = 10.00 kΩ"));
+        why_in(&kept, "Vcc = I * R1", "I is not given a value.");
+        why_in(&kept, "R1 || R3", "R3 is not given a value.");
+        why_in(&kept, "tau = R1C, C = 100nF", "R1C is read as one name. Write it as R1*C.");
+        // The rules for a named answer hold: a prefix needs its unit.
+        why_in(&kept, "R1 * 2k", "2k has a prefix but no unit.");
+        why_in(&kept, "R1 + 5V", "A resistance and a voltage cannot be added.");
+        // More than one strange word is a problem in words.
+        assert_eq!(show_in(&kept, "what is R1 times two"), None);
+        assert_eq!(why_not_in("what is R1 times two", &kept), None);
+        // Claude is not told the kept values, so an answer that used one
+        // is not offered to it to check.
+        assert!(evaluate_in("V = I * R, I = 2mA, R = 1kohm", &kept).unwrap().given);
+        assert!(!evaluate_in("V = I * R, I = 2mA, R = R1", &kept).unwrap().given);
+        assert!(!evaluate_in("12V = I * R1", &kept).unwrap().given);
+        assert!(!evaluate_in("R1 * 2", &kept).unwrap().given);
+    }
+
+    #[test]
+    fn keeping_a_value_changes_nothing_that_does_not_use_it() {
+        let kept = session(&["R1 = 10kohm", "f = 1kHz", "k = 5", "T = 20 ms", "beta = 200", "V_th = 1V"]);
+        for input in [
+            "4.7k",
+            "2.2mA * 4.7kohm",
+            "10kohm || 22kohm",
+            "5 T",
+            "100f",
+            "V * 2",
+            "1/(2*pi*10kohm*100nF)",
+            "VGS = -0.3V * 2",
+            "re = 25mV / Ic, Ic = 2mA",
+            "12V = I * 8ohm",
+            "5 N = m * 9.81 m/s^2",
+            "25 C + 2 W * 50 C/W",
+            "250mW in dBm",
+            "3.5 bar to psi",
+            "5V + 3mA",
+            "R2 * 2",
+            "what is the cutoff of an RC lowpass",
+        ] {
+            assert_eq!(evaluate_in(input, &kept), evaluate(input), "for {input:?}");
+            assert_eq!(why_not_in(input, &kept), why_not(input), "for {input:?}");
+        }
+    }
+
+    #[test]
+    fn what_the_window_hands_back_is_checked() {
+        // The window holds what is kept and hands it back as it was given.
+        let kept = session(&["R1 = 10kohm", "Ta = 25 C", "p1 = 3 bar"]);
+        let text = serde_json::to_string(&kept).unwrap();
+        let back: Vec<Kept> = serde_json::from_str(&text).unwrap();
+        check_in(&back, "R1 * 2", "20.00 kΩ", Some("R1 = 10.00 kΩ"));
+        check_in(&back, "Ta + 10 K", "35.00 °C", Some("Ta = 25.00 °C"));
+        check_in(&back, "p1 * 2", "6.000 bar", Some("p1 = 3.000 bar"));
+        // An entry that `keep` could not have made is left out, not used.
+        let forged: Vec<Kept> = serde_json::from_str(
+            r#"[
+                {"name": "V", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0]},
+                {"name": "sin", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0]},
+                {"name": "a1", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0], "hints": {"typed": [[9999, 1]]}},
+                {"name": "a2", "value": 5.0, "dim": [1, 0, 0, 0, 0, 0], "reading": "Celsius"},
+                {"name": "ok", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0]}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(evaluate_in("V * 2", &forged), evaluate("V * 2"));
+        assert_eq!(show_in(&forged, "a1 * 2"), None);
+        assert_eq!(show_in(&forged, "a2 * 2"), None);
+        check_in(&forged, "ok * 2", "10.00", Some("ok = 5.000"));
+    }
+
+    #[test]
+    fn a_prefix_letter_is_a_name_like_any_other() {
+        // A prefix alone means nothing, so after a `/` or `*` in a run of
+        // units it can only be the value of that name.
+        check("x_1 = 100 N/k, k = 50 N/m", "2.000 m");
+        check("X_L = 10mH*w, w = 2*pi*1kHz", "62.83 Ω");
+        // A unit's own letter there is still in doubt.
+        why(
+            "f = sqrt(k/m)/(2*pi), k = 100 N/m, m = 2 kg",
+            "m could be a unit or the value you named m. Give the value another name, such as m_1.",
+        );
     }
 
     #[test]

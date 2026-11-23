@@ -18,14 +18,16 @@ revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
-becomes a last resort. Its first three slices are built (2026-11-23), and
-none is released yet; 0.12.0 and 0.13.0 were never tagged. 0.12.0: on
-Enter, the app says why it refused an input, where it knows for certain
-(see "Saying why" under "Instant path"). 0.13.0: a formula with its values
-after it is answered as you type (see "Values after a formula"). 0.14.0:
-an equation with one value left out is solved for it (see "Solving for
-an unknown").
-Next: the fourth slice, named values that last the session.
+becomes a last resort. Its first four slices are built (2026-11-23), and
+none is released yet; 0.12.0, 0.13.0 and 0.14.0 were never tagged.
+0.12.0: on Enter, the app says why it refused an input, where it knows for
+certain (see "Saying why" under "Instant path"). 0.13.0: a formula with
+its values after it is answered as you type (see "Values after a
+formula"). 0.14.0: an equation with one value left out is solved for it
+(see "Solving for an unknown"). 0.15.0: Enter on an answer with a name in
+front keeps it under that name until the app is quit, and later inputs may
+use the name (see "Named values that last the session").
+Next: the fifth slice, constants and units for science.
 
 ## Purpose
 
@@ -83,7 +85,9 @@ Unofficial project. Not affiliated with or endorsed by Anthropic.
    engine knows why, Enter says why first, and Enter again asks Claude
    (from 0.12.0). A formula with its values after it is answered as
    typed, and Enter then has Claude check it (from 0.13.0). The same goes
-   for an equation with one value left out (from 0.14.0).
+   for an equation with one value left out (from 0.14.0). Enter on an
+   answer with a name in front keeps it under that name for the session
+   (from 0.15.0).
 4. The answer appears large, in engineering notation with units.
 5. Click back into other work. The window stays on top with the answer visible.
 6. Esc hides it to the tray.
@@ -201,7 +205,9 @@ Memory holds preferences only. It never holds problems, answers or history.
   memory notes file. A key for a model service, once that route is built,
   lives in the operating system's credential store (Windows Credential
   Manager on Windows).
-  Nothing else. Session history is never written to disk.
+  Nothing else. Session history is never written to disk, and nor are the
+  values kept under a name for the session: both are held in memory and
+  are gone when the app quits.
 - No telemetry, no analytics, no history, no logging of problems or answers.
 - Every problem (and the memory notes) is sent to Anthropic's API to be
   solved, under Anthropic's API data-retention terms. The README must say this
@@ -702,7 +708,8 @@ Rules:
   current.
 - Instant answers have no steps and no notes. A complex one has its
   parts on a second line, and so has an equation's second answer (see
-  "Solving for an unknown").
+  "Solving for an unknown"). One that used values kept for the session
+  has those on a line beneath (see "Named values that last the session").
 - A plain number between 0.1 and 1000 is shown without a prefix (`0.1250`,
   `338.6`); everything else uses engineering notation (`5.998 k`).
 - A plain number in the thousandths is written out (`0.05000`), never given
@@ -711,8 +718,140 @@ Rules:
 - `gal` is the US gallon and `hp` is mechanical horsepower (745.7 W);
   metric horsepower is `PS`.
 
-Not in the instant path: values that last from one input to the next, the
-decimal comma, and a plain ratio in decibels. Those go to Claude.
+Not in the instant path: the decimal comma, and a plain ratio in
+decibels. Those go to Claude. Values that last from one input to the next
+were on this list until 0.15.0.
+
+### Named values that last the session (0.15.0)
+
+The fourth slice of "Hardening the engine": `R1 = 10kohm`, kept with
+Enter, and then `R1` in what follows.
+
+| Typed | Shown |
+|---|---|
+| `R1 = 10kohm` and Enter | 10.00 kΩ, and "R1 is kept until Slipstick is quit." |
+| `R2 = 22kohm` and Enter, `Vcc = 9V` and Enter | the same |
+| `Vcc * R2 / (R1 + R2)` | 6.188 V, with "Vcc = 9.000 V, R2 = 22.00 kΩ, R1 = 10.00 kΩ" beneath |
+| `R1 \|\| R2` | 6.875 kΩ, with "R1 = 10.00 kΩ, R2 = 22.00 kΩ" beneath |
+| `12V = I * R1` | 1.200 mA, with "R1 = 10.00 kΩ" beneath |
+| `fc = 1/(2*pi*R*C), R = R1, C = 100nF` | 159.2 Hz, with "R1 = 10.00 kΩ" beneath |
+| `R1` | 10.00 kΩ |
+
+Decided with the user on 2026-11-23:
+
+- **Enter keeps it.** Enter on an answer that has a name in front keeps
+  the answer under that name. Nothing is kept by typing alone. The message
+  row confirms it: "R1 is kept until Slipstick is quit." Enter again on
+  the same text does not keep it a second time, so `R1 = R1 * 2` doubles
+  R1 once.
+- **The values an answer used are shown beneath it,** on the small line a
+  complex answer's parts use: "Vcc = 9.000 V, R1 = 10.00 kΩ", in the order
+  they are first used. The app stays running in the tray, so a kept value
+  can be days old; shown this way, an old one is never used unseen. A
+  kept name typed alone shows its value, with nothing beneath.
+- **A name holds the number it had when it was kept, not its formula.**
+  `R2 = R1 * 2` kept while R1 is 10 kΩ is 20 kΩ, and stays 20 kΩ when R1
+  is kept again as 22 kΩ.
+
+The rules (`keep`, `Session` and `Kept` in `calc.rs`):
+
+- **Nothing that was answered before changes because a value is kept.**
+  Input that uses no kept name is read exactly as it was. This is tested
+  by putting inputs of every kind through the engine with values kept and
+  without.
+- **So a name cannot be kept if the word already means something standing
+  alone.** `V * 2` is two volts, so `V` cannot be kept: Enter on `V = 12V`
+  says "V is a unit, so it cannot be kept. Use a name such as V1." The
+  same goes for every unit and its prefixed forms (`C`, `m`, `K`, `mA`),
+  the decibel words, functions, constants (`e`, `pi`, `j`), `x`, `to` and
+  `in`. This is stricter than a formula with its values after it, where a
+  value may be called `V`: there the name and its value are in the one
+  input, and here the name was given some time ago.
+- **A prefix alone means nothing, so a prefix's letter is a name like any
+  other:** `f`, `k`, `T`, `G`, `n`, `p`, `M`. `2 * pi * f * 10mH` uses the
+  kept `f`.
+- **Straight after a number a word is a unit or a prefix, as everywhere.**
+  With `k` kept, `2k` is still two thousand; twice k is `2 * k`.
+- **What can be kept** is the value the input comes to: an answer as
+  shown, the answer to a formula with its values after it, or a value the
+  window does not show by itself, as for the values after a formula: a
+  bare number (`beta = 200`) or a unit with no name of its own
+  (`kn = 2 mA/V^2`). For those two Enter shows only the confirmation.
+- **What cannot,** each with "That answer cannot be kept under a name.": a
+  level in decibels, a percentage, an answer asked for in a unit of
+  another kind than the value (`f1 = 1500 rpm to Hz`, `T2 = 300 K to C`),
+  the value an equation was solved for (the name in front is not the
+  value found), and a name with a tag in brackets (`VGS(off)`).
+- **A unit asked for of the value's own kind** is kept as the quantity:
+  `d1 = 2 in to mm` shows 50.80 mm, and `d1` afterwards is the same
+  length, shown by the usual rules (2.000 in, the unit typed).
+- **The units a value was typed in decide how later answers are shown,**
+  as they would if the value were typed in place: with `p1 = 3 bar` kept,
+  `p1 * 2` is 6.000 bar; an energy stays in joules; a temperature stays a
+  temperature on its scale, so `Ta + 2 W * 50 C/W` is 125.0 °C and
+  `Ta * 2` is refused.
+- **Input that uses a kept value is held to the rules for a named
+  answer.** A prefix with no unit is refused (`R1 * 2k`), as it is under a
+  name. One word nothing knows is a value that was not given
+  (`R1 || R3`: "R3 is not given a value."); more than one is a problem in
+  words, for a model.
+- **A name in front is the answer's name, even where a value is kept
+  under it.** `Vcc = I * R1` with `Vcc` kept is a formula with `I`
+  missing, not an equation to solve for `I`, and `R1 = 4.7kohm` is a new
+  value for R1. Read as an equation, a mistyped name would give a wrong
+  number with no warning. To solve with a kept value on one side, put it
+  where it is not the name: `I * R1 = Vcc`.
+- **A value given after a formula takes the place of a kept one of the
+  same name,** for that input only. A value given there must still be
+  used; a kept one need not be.
+- **Claude is not told the kept values.** So an answer that used one is
+  not offered to Claude to check, and a problem sent to Claude that names
+  one will come back needing it.
+- **The window holds what is kept and hands it back with each input.**
+  The engine keeps nothing between inputs. What comes back is checked: an
+  entry `keep` could not have made is left out. At most 200 names; a new
+  one after that is refused with a message.
+
+**Enter on a formula with its values after it** (see "Values after a
+formula") now has two things it could do. Decided with the user on
+2026-11-23, keeping first:
+
+- If the answer can be kept, Enter keeps it. With Claude connected the
+  message adds "Enter again has Claude check the formula.", and Enter
+  again does.
+- If it cannot be kept (no name in front, or a name such as `V`), Enter
+  with Claude connected has Claude check it straight away, as before, with
+  no remark about keeping.
+- Without Claude connected, a name that cannot be kept draws its reason.
+
+Changed with this slice, for a formula with its values after it too: in
+the run of units behind a number, a name that is only a prefix's letter is
+no longer in doubt. `x_1 = 100 N/k, k = 50 N/m` was refused with "k could
+be a unit or the value you named k" and is now 2.000 m. A unit's own
+letter there (`m`) is refused as before.
+
+Not done: forgetting one value, or all of them, short of quitting the
+app; a list of what is kept; telling Claude the kept values; keeping the
+value an equation was solved for; keeping a level in decibels; a kept
+value in a conversion to decibels; and showing a kept value with no
+nameable unit when its name is typed alone.
+
+Checked for 0.15.0 (2026-11-23): 87 unit tests, of which eight groups are
+new (keeping and using a value, that a value holds its number, what a
+value may be, what cannot be kept, kept values in formulas and equations,
+that nothing changes for input that uses no kept value, that what the
+window hands back is checked, and prefix letters as names), and the 79
+from before pass unchanged; every reference problem through the instant
+path alone, which answers the same six as 0.14.0; and the window in the
+built-in browser, where Enter keeps a named answer and says so, the values
+used sit beneath the answer and break between values, a second Enter keeps
+nothing more, a bare number is kept with only the confirmation, the
+reasons appear on Enter, history recall still works, and, with the
+question to Claude replaced by a stand-in so that none was asked, a
+formula that can be kept is checked on the second Enter and one that
+cannot on the first. Not checked: the real app, and a real question to
+Claude after keeping. The instructions to Claude are unchanged, so the
+reference set was not run through a model.
 
 ### Solving for an unknown (0.14.0)
 
@@ -853,7 +992,9 @@ The rules (`given` in `calc.rs`):
   two volts and never twice V; that is written `2*V`.
 - **One place is in doubt, and is refused:** in the run of units behind a
   number, a `/` or `*` and then a name that is also a unit. In `100 N/m`
-  with a value called `m`, the `m` could be metres or that value.
+  with a value called `m`, the `m` could be metres or that value. A name
+  that is only a prefix's letter (`k`) is not in doubt, since a prefix
+  alone means nothing; until 0.15.0 it was refused as well.
 - **A prefix with no unit is refused,** as it is for any named answer
   (`Rd = 10k`). The evaluator may not guess that an `R` is in ohms, so
   the reference problem `gain = Rd * gm, Rd = 10k, gm = 2.1mS` is given
@@ -878,6 +1019,9 @@ definitely wrong. Answered instantly, they would never reach it. So:
 - Every other instant answer is as before: Enter does nothing.
 - The engine marks such an answer (`given` on `Answer`), and the window
   goes by that.
+- From 0.15.0, Enter on such an answer with a name in front that can be
+  kept keeps it first, and Enter again has Claude check it. See "Named
+  values that last the session".
 
 Two of the reference set's four "must flag" problems are now answered
 instantly (`P = V / R, …` and the JFET formula with its square missing),
@@ -902,8 +1046,8 @@ inside a formula too (`P = V + I, V = 12V, I = 2A`).
 
 Not done: a name with a tag in brackets (`VGS(off)`); `|x|` for a
 magnitude, which is `abs(x)`; values written with nothing between them
-(`2πRC`, which is given the reason above); values that last to the next
-input (slice 4); and steps for these answers (slice 7).
+(`2πRC`, which is given the reason above); and steps for these answers
+(slice 7). Values that last to the next input came in 0.15.0.
 
 Checked for 0.13.0 (2026-11-23): 75 unit tests, of which four groups are
 new (a formula with its values, names that are unit letters, the rules it
@@ -1794,8 +1938,11 @@ types.
    2026-11-23, in 0.14.0: see "Solving for an unknown" under "Instant
    path". The solver Claude's working uses needs a starting guess, which
    typed input has not got, so this one searches instead.*
-4. **Named values that last the session:** `R1 = 10k`, then `R1` in what
-   follows. Held in memory only.
+4. **Named values that last the session:** `R1 = 10kohm`, then `R1` in
+   what follows. Held in memory only. *Built 2026-11-23, in 0.15.0: see
+   "Named values that last the session" under "Instant path". As first
+   written here the example had `R1 = 10k`, which is refused: a prefix
+   needs its unit.*
 5. **Constants and units for science:** Boltzmann's constant, the electron
    charge, `c`, `g`; moles, electronvolts.
 6. **Helpers for the trade:** the nearest standard resistor value,
