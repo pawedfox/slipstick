@@ -17,8 +17,8 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.18.0, not yet released; 0.11.0 is the current release
-(2026-11-22), and 0.12.0 to 0.17.0 were never tagged. Work follows
+Version 0.18.0, the current release (2026-11-24). The one before it was
+0.11.0; 0.12.0 to 0.17.0 were never tagged. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 

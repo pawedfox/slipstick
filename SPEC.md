@@ -5,21 +5,22 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-22, version 0.11.0): everything on the first roadmap is
-built, for the Claude Code route. 0.9.2 was the first public release,
-0.10.1 followed on 2026-11-22, and 0.11.0, the current release, the same
+Status (2026-11-24, version 0.18.0, the current release): everything on
+the first roadmap is built, for the Claude Code route. 0.9.2 was the first
+public release, 0.10.1 followed on 2026-11-22, and 0.11.0 the same
 day (see "Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
 conversions between rpm and Hz to the instant path, and 0.11.0 adds
 complex numbers (see "Instant path"). That completes item 2 of the
 roadmap. Not built: a second route to a model (first planned as an
 API-key route, now provider-neutral), signing, memory.
 The mission was re-framed on 2026-11-23 (see "Purpose") and the roadmap
-revised with it (see "Roadmap"). The app itself is unchanged by that:
-0.11.0 still runs on Windows only and still asks Claude through Claude
-Code only.
+revised with it (see "Roadmap"). The app has not caught up with that: it
+still runs on Windows only and still asks Claude through Claude Code
+only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
 becomes a last resort. All seven of its slices are built (2026-11-23 and
-24), and none is released yet; 0.12.0 to 0.17.0 were never tagged.
+24) and were released together in 0.18.0 on 2026-11-24 (see "Release");
+0.12.0 to 0.17.0 were never tagged.
 0.12.0: on Enter, the app says why it refused an input, where it knows for
 certain (see "Saying why" under "Instant path"). 0.13.0: a formula with
 its values after it is answered as you type (see "Values after a
@@ -337,6 +338,33 @@ public.
   - **Published 2026-11-22** on the user's word. Checked without signing
     in: it is the latest release, and the downloaded installer's SHA-256
     is the one in `SHA256SUMS.txt`.
+- **0.18.0**, tagged 2026-11-24 on the user's word, to try the seven
+  slices of "Hardening the engine" in the installed app. None of 0.12.0
+  to 0.17.0 was tagged, so until then all seven had been checked only in
+  unit tests and in the window in the built-in browser. Two of them touch
+  the window: keeping a value with Enter (0.15.0) and the Steps control on
+  an instant answer (0.18.0).
+  - GitHub built it in under ten minutes, every step passing, and the
+    checksum in `SHA256SUMS.txt` is the installer's
+    (`Slipstick_0.18.0_x64-setup.exe`, 1.57 MB). It is a draft, and 0.11.0
+    is still the latest release.
+  - **Tried by the user the same day**, from the draft. They were asked to
+    type nine inputs, one or two for each slice (a refusal and its reason
+    on Enter, a formula with its values, an equation, a value kept with
+    Enter and then used, two constants, `to E12`, `+/- 5%` and
+    `0xFF + 1`), to open Steps on a local answer and watch the window
+    grow, show the steps and close them on the next key, to watch the
+    window grow by a line for what is beneath an answer and go back, and
+    to send a problem to Claude. They reported that it was tried and all
+    works. Which of those they did was not asked.
+  - **Published 2026-11-24** on the user's word, with release notes that
+    cover all seven slices and were shown to them first. Every answer
+    quoted in the notes was run through the engine that day. Checked
+    without signing in: it is the latest release, and the downloaded
+    installer's SHA-256 is the one in `SHA256SUMS.txt`.
+  - The README in the tagged source says "not yet released", as the tag
+    was made before the release was. The README on `main` is the one
+    people read, and was put right the same day.
 - **Published 2026-11-21**, on the user's word, after the user installed
   the 0.9.2 installer from the draft and found it working. Checked
   without signing in: the repository page, the README's pictures and the

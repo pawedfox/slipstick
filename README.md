@@ -14,13 +14,8 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.18.0, not yet released. The latest release is 0.11.0,
-which does not yet say why it refused an input, take a formula with its
-values after it, solve for a value left out, keep a value under a name,
-know the constants, electronvolts and moles, have standard values,
-tolerances, hexadecimal and binary, or show steps for its own answers.
-It is one person's tool,
-in daily use by its author; expect rough edges. See
+Status: version 0.18.0. It is one person's tool, in daily use by its
+author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
