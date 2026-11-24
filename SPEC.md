@@ -18,16 +18,18 @@ revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
-becomes a last resort. Its first four slices are built (2026-11-23), and
-none is released yet; 0.12.0, 0.13.0 and 0.14.0 were never tagged.
+becomes a last resort. Its first five slices are built (2026-11-23), and
+none is released yet; 0.12.0 to 0.15.0 were never tagged.
 0.12.0: on Enter, the app says why it refused an input, where it knows for
 certain (see "Saying why" under "Instant path"). 0.13.0: a formula with
 its values after it is answered as you type (see "Values after a
 formula"). 0.14.0: an equation with one value left out is solved for it
 (see "Solving for an unknown"). 0.15.0: Enter on an answer with a name in
 front keeps it under that name until the app is quit, and later inputs may
-use the name (see "Named values that last the session").
-Next: the fifth slice, constants and units for science.
+use the name (see "Named values that last the session"). 0.16.0: nine
+constants of physics by name, and the electronvolt and the mole as units
+(see "Constants and units for science").
+Next: the sixth slice, helpers for the trade.
 
 ## Purpose
 
@@ -494,7 +496,8 @@ What it answers, as you type:
   - torque: N·m (`Nm`), lb·ft, lb·in, oz·in; power: W, hp, PS;
   - angle and rotation: rad, deg (`°`), rev, rpm;
   - volume and flow: L, gal (US), cc, L/min (`lpm`), gpm, cfm;
-  - speed: mph, km/h, or any length over time.
+  - speed: mph, km/h, or any length over time;
+  - for science (0.16.0): eV, with meV, keV, MeV and GeV, and mol.
   Units combine: `6 bar * pi * (25mm)^2` is 1.178 kN.
 - **Conversions:** `3.5 bar to psi`, `12 L/min to gpm`, `2 in² to cm²`.
   `in` works as well as `to` where it cannot mean inches.
@@ -708,8 +711,9 @@ Rules:
   current.
 - Instant answers have no steps and no notes. A complex one has its
   parts on a second line, and so has an equation's second answer (see
-  "Solving for an unknown"). One that used values kept for the session
-  has those on a line beneath (see "Named values that last the session").
+  "Solving for an unknown"). One that used values kept for the session,
+  or constants, has those on a line beneath (see "Named values that last
+  the session" and "Constants and units for science").
 - A plain number between 0.1 and 1000 is shown without a prefix (`0.1250`,
   `338.6`); everything else uses engineering notation (`5.998 k`).
 - A plain number in the thousandths is written out (`0.05000`), never given
@@ -721,6 +725,119 @@ Rules:
 Not in the instant path: the decimal comma, and a plain ratio in
 decibels. Those go to Claude. Values that last from one input to the next
 were on this list until 0.15.0.
+
+### Constants and units for science (0.16.0)
+
+The fifth slice of "Hardening the engine".
+
+| Input | Answer | Beneath |
+|---|---|---|
+| `k_B * 300 K / q_e` | 25.85 mV | k_B = 1.381e-23 J/K, q_e = 1.602e-19 C |
+| `5 kg * g0` | 49.03 N | g0 = 9.807 m/s² |
+| `eps_0 * 1 cm^2 / 1 mm` | 885.4 fF | eps_0 = 8.854e-12 F/m |
+| `sqrt(mu_0 / eps_0)` | 376.7 Ω | mu_0 = 1.257e-6 H/m, eps_0 = 8.854e-12 F/m |
+| `h_P * c_0 / 650 nm to eV` | 1.907 eV | h_P = 6.626e-34 J·s, c_0 = 2.998e8 m/s |
+| `1 mol * R_gas * 273.15 K / 1 atm` | 22.41 L | R_gas = 8.314 J/(mol·K) |
+| `h_P * c_0 / lambda = 2 eV` | 619.9 nm | h_P = 6.626e-34 J·s, c_0 = 2.998e8 m/s |
+| `Vt = k_B * T / q_e, T = 300 K` | 25.85 mV | k_B = 1.381e-23 J/K, q_e = 1.602e-19 C |
+| `2 eV + 3 eV` | 5.000 eV | |
+| `1.5 mmol * 2` | 3.000 mmol | |
+| `k_B` | 1.381e-23 J/K | |
+
+**The constants** (`CONSTANTS` in `calc.rs`), decided with the user on
+2026-11-23. The spec named four; the user chose these nine.
+
+| Typed | Constant | Value |
+|---|---|---|
+| `k_B`, `kB` | Boltzmann's constant | 1.380649e-23 J/K |
+| `q_e`, `qe` | charge on an electron | 1.602176634e-19 C |
+| `c_0`, `c0` | speed of light | 299 792 458 m/s |
+| `g_0`, `g0` | standard gravity | 9.80665 m/s² |
+| `eps_0`, `eps0`, `ε_0`, `ε0` | permittivity of free space | 8.8541878188e-12 F/m |
+| `mu_0`, `mu0`, `μ_0`, `μ0` | permeability of free space | 1.25663706127e-6 H/m |
+| `h_P`, `hP` | Planck's constant | 6.62607015e-34 J·s |
+| `N_A`, `NA` | Avogadro's number | 6.02214076e23 mol⁻¹ |
+| `R_gas`, `Rgas` | molar gas constant | 8.314462618 J/(mol·K) |
+
+The values are the 2022 CODATA ones, read from NIST's pages on the day.
+All are exact by definition but the permittivity and the permeability,
+which are measured. The gas constant is held as the Boltzmann constant
+times Avogadro's number.
+
+Decided with the user:
+
+- **Each is typed with its subscript, with or without the underscore.** A
+  single letter is never a constant. The spec had `c` and `g`: `g` is
+  already the gram (`g * 2` is 2.000 g), `k` is the prefix kilo, and `c`
+  and `q` are left as names the user may give their own values. None of
+  the names above was answered before, or is a unit, so nothing that was
+  answered has changed.
+- **A constant an answer used is listed beneath it,** on the line kept
+  values use, so the value that went in is seen: 9.807 and not 9.81. It is
+  given in its own unit with no prefix, and under the name as it was
+  typed.
+
+The rules:
+
+- **A constant behaves as a value kept for the session does.** It is read
+  where its name stands alone, never straight after a number (`2 c0` is
+  refused; twice c is `2 * c0`). Input that uses one is held to the rules
+  for a named answer: a prefix needs its unit (`4.7k * q_e` is refused).
+  An answer that used one is not offered to Claude to check.
+- **Typed alone, a constant shows its value** in its own unit.
+- **A value given after a formula under a constant's name takes its
+  place,** for that input, as it did before there were constants:
+  `y = k_B * 2, k_B = 3` is 6.000.
+- **Nothing can be kept under a constant's name:** "k_B already means
+  something here, so it cannot name a value."
+- **Energies worked out with a constant are in joules,** not newton
+  metres, except with standard gravity: `5 kg * g_0 * 2 m` is 98.07 N·m.
+- **Typed input only.** A program's steps have the names the program gives
+  them, and Claude's instructions are unchanged.
+
+**The electronvolt.** `eV`, `meV`, `keV`, `MeV` and `GeV` are each a unit
+that takes no prefix, as `bar` and `mbar` are. So an answer typed in one
+of them stays in it (`3 meV * 2` is 6.000 meV), and any can be asked for
+(`k_B * 300 K to meV` is 25.85 meV). Mixed, the answer is in joules, as
+mixed pressures are in pascals: `1.5 keV + 500 eV` is 3.204e-16 J, and
+`… to keV` gives 2.000 keV.
+
+**The mole.** `mol` (also `mole`, `moles`), with prefixes. Amount of
+substance is a seventh dimension of its own, so `2 mol + 1` is refused:
+"An amount of substance and a plain number cannot be added." An equation
+can be solved for one: `2 atm * 10 L = n * R_gas * 300 kelvin` is
+812.4 mmol.
+
+Two faults found while building this, both fixed:
+
+- **A lone `K` in an equation was always taken for kilo,** so
+  `P * 1 L = n * R_gas * 300 K, n = 1 mol` was refused with "300K has a
+  prefix but no unit." It is now read as kelvin where kilo gives no
+  answer, as everywhere else, and that input is 2.494 MPa. Where neither
+  reading makes sense the missing unit is still the reason
+  (`12V = I * 4.7K`).
+- **`g1 = 9.81 m/s^2` could not be kept** (0.15.0, unreleased). Read as a
+  bare value, its lone `m` could be milli or metres. What is kept is now
+  the answer on screen where there is one, which had already settled it.
+
+Not done: a unit with no name of its own is still refused, so a molar
+mass (`18 g / 1 mol`), a concentration (`0.5 mol / 2 L`) and Faraday's
+constant (`q_e * N_A`) get no answer; the coulomb still cannot be typed,
+because `C` is Celsius; a temperature on the Celsius scale cannot be
+multiplied, so `k_B * 27 C` is refused and wants `300.15 K`; and mixed
+electronvolt units are not gathered into one of them.
+
+Checked for 0.16.0 (2026-11-23): 91 unit tests, of which four groups are
+new (the constants, that a constant takes no name that meant something,
+electronvolts and moles, and a lone `K` in an equation), with the expected
+values worked out by hand, and the 87 from before pass, with a few lines
+added to two of them for the second fault above; every reference problem through
+the instant path alone, which answers the same six as 0.15.0; and the
+window in the built-in browser, where a constant alone shows its value, an
+answer lists the constants it used beneath it with their subscripts set,
+a constant's name cannot be kept, and a value worked out with one can.
+Not checked: the real app. The instructions to Claude are unchanged, so
+the reference set was not run through a model.
 
 ### Named values that last the session (0.15.0)
 
@@ -1944,7 +2061,10 @@ types.
    written here the example had `R1 = 10k`, which is refused: a prefix
    needs its unit.*
 5. **Constants and units for science:** Boltzmann's constant, the electron
-   charge, `c`, `g`; moles, electronvolts.
+   charge, `c`, `g`; moles, electronvolts. *Built 2026-11-23, in 0.16.0:
+   see "Constants and units for science" under "Instant path". The
+   constants are typed with a subscript (`k_B`, `c_0`, `g_0`), since `g`
+   is the gram, and five more were added.*
 6. **Helpers for the trade:** the nearest standard resistor value,
    tolerance ranges, hexadecimal and binary.
 7. **Steps for answers the engine gives by itself** (asked about by the

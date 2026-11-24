@@ -17,8 +17,8 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.15.0, not yet released; 0.11.0 is the current release
-(2026-11-22), and 0.12.0, 0.13.0 and 0.14.0 were never tagged. Work follows
+Version 0.16.0, not yet released; 0.11.0 is the current release
+(2026-11-22), and 0.12.0 to 0.15.0 were never tagged. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -29,7 +29,7 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   model, so that asking one is a last resort. Models that run on the
   user's own machine are dropped as an aim.
 - Item 1 of the roadmap is hardening the engine, in the slices under
-  "Hardening the engine" in `SPEC.md`. Four are built. In 0.12.0, on
+  "Hardening the engine" in `SPEC.md`. Five are built. In 0.12.0, on
   Enter the app says why it refused an input, where it is certain
   (`why_not` in `calc.rs`; "Saying why" in `SPEC.md`). In 0.13.0, a
   formula with its values after it is answered as typed (`given` in
@@ -41,8 +41,11 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   later inputs may use the name (`keep`, `Kept` and `Session` in
   `calc.rs`; "Named values that last the session" in `SPEC.md`). Enter on
   a formula with its values that can be kept keeps it first, and has
-  Claude check it on the second Enter; the user chose that order. Next is
-  the fifth slice, constants and units for science. After
+  Claude check it on the second Enter; the user chose that order. In
+  0.16.0, nine constants of physics are known by name, and the
+  electronvolt and the mole are units (`CONSTANTS` in `calc.rs`;
+  "Constants and units for science" in `SPEC.md`). Next is the sixth
+  slice, helpers for the trade. After
   the engine come macOS, then one small
   provider-neutral route, then Linux, then a formula library. What was
   found is under "Models other than Claude" and "Other operating systems"
@@ -171,6 +174,13 @@ Run from the repo root unless noted.
   gives a wrong number with no warning. A command that takes typed input
   takes `kept` too, in `lib.rs`, `src/dev-bridge.ts`, `tools/dev-bridge.mjs`
   and `solve.rs`.
+  A constant (`CONSTANTS`) is a value the session always has, and goes
+  the same way as a kept one. To add one, add a row and a test, and check
+  first that none of its names is answered today or is a unit: a name
+  that already means something would change old answers, which is why
+  `g`, `h`, `c`, `q` and `k` are not constants. Take values from NIST's
+  CODATA pages, not from memory. Dimensions have seven entries (`Dim`),
+  the last being the mole.
   An equation is solved by search (`roots_of`), not by algebra. A value it
   returns has been put back into the equation, so it always fits; it may
   not be the only one, and two answers that are not a matching plus and

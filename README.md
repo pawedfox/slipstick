@@ -14,10 +14,10 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.15.0, not yet released. The latest release is 0.11.0,
+Status: version 0.16.0, not yet released. The latest release is 0.11.0,
 which does not yet say why it refused an input, take a formula with its
-values after it, solve for a value left out, or keep a value under a
-name. It is one person's tool,
+values after it, solve for a value left out, keep a value under a name,
+or know the constants, electronvolts and moles. It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
@@ -59,6 +59,10 @@ No account and no network. The answer changes with every key.
 | `12V = I * 8ohm` | 1.500 A |
 | `fc = 1/(2*pi*R*C), fc = 10 Hz, R = 1Mohm` | 15.92 nF |
 | `Vth = Vcc * R2 / (R1 + R2), Vth = 1.623V, Vcc = 9V, R1 = 100kohm` | 22.00 kΩ |
+| `k_B * 300 K / q_e` | 25.85 mV |
+| `eps_0 * 1 cm^2 / 1 mm` | 885.4 fF |
+| `h_P * c_0 / 650 nm to eV` | 1.907 eV |
+| `1 mol * R_gas * 273.15 K / 1 atm` | 22.41 L |
 
 It understands:
 
@@ -67,8 +71,28 @@ It understands:
 - **Units, with the dimensions checked.** Electrical (V, A, Ω, F, H, S, W,
   Hz, J, Wh), magnetic (Wb, tesla), time, length, mass, force, pressure
   (Pa, bar, psi, atm), torque (N·m, lb·ft), power (W, hp), angle and
-  rotation (deg, rad, rpm), volume and flow (L, gal, L/min, gpm, cfm), and
-  speed. Volts times amps comes out in watts; volts plus amps is refused.
+  rotation (deg, rad, rpm), volume and flow (L, gal, L/min, gpm, cfm),
+  speed, electronvolts (eV, meV, keV, MeV, GeV) and moles. Volts times
+  amps comes out in watts; volts plus amps is refused.
+- **Constants,** typed with their subscript, with or without the
+  underscore:
+
+  | Typed | Constant | Value |
+  |---|---|---|
+  | `k_B` or `kB` | Boltzmann's constant | 1.380649e-23 J/K |
+  | `q_e` or `qe` | charge on an electron | 1.602176634e-19 C |
+  | `c_0` or `c0` | speed of light | 299 792 458 m/s |
+  | `g_0` or `g0` | standard gravity | 9.80665 m/s² |
+  | `eps_0`, `eps0` or `ε0` | permittivity of free space | 8.8541878188e-12 F/m |
+  | `mu_0`, `mu0` or `μ0` | permeability of free space | 1.25663706127e-6 H/m |
+  | `h_P` or `hP` | Planck's constant | 6.62607015e-34 J·s |
+  | `N_A` or `NA` | Avogadro's number | 6.02214076e23 /mol |
+  | `R_gas` or `Rgas` | molar gas constant | 8.314462618 J/(mol·K) |
+
+  An answer lists the constants it used on a line beneath it
+  (`g0 = 9.807 m/s²`), so you see the value that went in. Type one alone
+  to see it. A single letter is never a constant: `g` is the gram, `k` is
+  kilo, and `c` and `q` are yours to name. Write `2 * c0`, not `2 c0`.
 - **Conversions** with `to` (or `in`): `25 mm to in`. Between rpm and Hz
   one revolution is one cycle, so `50 Hz to rpm` is 3000 rpm. The two are
   never mixed in a sum.

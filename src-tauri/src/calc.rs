@@ -37,42 +37,45 @@ pub fn with_sig_figs<T>(figures: u8, work: impl FnOnce() -> T) -> T {
     result
 }
 
-/// Exponents of: kilogram, metre, second, ampere, angle, kelvin.
+/// Exponents of: kilogram, metre, second, ampere, angle, kelvin, mole.
 ///
 /// Angle is tracked as its own dimension so that `rpm` (an angular speed)
-/// cannot be silently mixed up with `Hz`; the two differ by 2π.
-type Dim = [i8; 6];
-const NO_DIM: Dim = [0; 6];
+/// cannot be silently mixed up with `Hz`; the two differ by 2π. The mole
+/// is one too, so that an amount of substance is not added to a plain
+/// number.
+type Dim = [i8; 7];
+const NO_DIM: Dim = [0; 7];
 const ANGLE: usize = 4;
 
-const LENGTH: Dim = [0, 1, 0, 0, 0, 0];
-const AREA: Dim = [0, 2, 0, 0, 0, 0];
-const VOLUME: Dim = [0, 3, 0, 0, 0, 0];
-const MASS: Dim = [1, 0, 0, 0, 0, 0];
-const TIME: Dim = [0, 0, 1, 0, 0, 0];
-const FREQUENCY: Dim = [0, 0, -1, 0, 0, 0];
-const SPEED: Dim = [0, 1, -1, 0, 0, 0];
-const ACCELERATION: Dim = [0, 1, -2, 0, 0, 0];
-const FLOW: Dim = [0, 3, -1, 0, 0, 0];
-const FORCE: Dim = [1, 1, -2, 0, 0, 0];
-const PRESSURE: Dim = [1, -1, -2, 0, 0, 0];
-const ENERGY: Dim = [1, 2, -2, 0, 0, 0];
-const POWER: Dim = [1, 2, -3, 0, 0, 0];
-const CURRENT: Dim = [0, 0, 0, 1, 0, 0];
-const CHARGE: Dim = [0, 0, 1, 1, 0, 0];
-const VOLTAGE: Dim = [1, 2, -3, -1, 0, 0];
-const RESISTANCE: Dim = [1, 2, -3, -2, 0, 0];
-const CONDUCTANCE: Dim = [-1, -2, 3, 2, 0, 0];
-const CAPACITANCE: Dim = [-1, -2, 4, 2, 0, 0];
-const INDUCTANCE: Dim = [1, 2, -2, -2, 0, 0];
-const MAGNETIC_FLUX: Dim = [1, 2, -2, -1, 0, 0];
-const FLUX_DENSITY: Dim = [1, 0, -2, -1, 0, 0];
-const ANGLE_DIM: Dim = [0, 0, 0, 0, 1, 0];
-const ANGULAR_SPEED: Dim = [0, 0, -1, 0, 1, 0];
+const LENGTH: Dim = [0, 1, 0, 0, 0, 0, 0];
+const AREA: Dim = [0, 2, 0, 0, 0, 0, 0];
+const VOLUME: Dim = [0, 3, 0, 0, 0, 0, 0];
+const MASS: Dim = [1, 0, 0, 0, 0, 0, 0];
+const TIME: Dim = [0, 0, 1, 0, 0, 0, 0];
+const FREQUENCY: Dim = [0, 0, -1, 0, 0, 0, 0];
+const SPEED: Dim = [0, 1, -1, 0, 0, 0, 0];
+const ACCELERATION: Dim = [0, 1, -2, 0, 0, 0, 0];
+const FLOW: Dim = [0, 3, -1, 0, 0, 0, 0];
+const FORCE: Dim = [1, 1, -2, 0, 0, 0, 0];
+const PRESSURE: Dim = [1, -1, -2, 0, 0, 0, 0];
+const ENERGY: Dim = [1, 2, -2, 0, 0, 0, 0];
+const POWER: Dim = [1, 2, -3, 0, 0, 0, 0];
+const CURRENT: Dim = [0, 0, 0, 1, 0, 0, 0];
+const CHARGE: Dim = [0, 0, 1, 1, 0, 0, 0];
+const VOLTAGE: Dim = [1, 2, -3, -1, 0, 0, 0];
+const RESISTANCE: Dim = [1, 2, -3, -2, 0, 0, 0];
+const CONDUCTANCE: Dim = [-1, -2, 3, 2, 0, 0, 0];
+const CAPACITANCE: Dim = [-1, -2, 4, 2, 0, 0, 0];
+const INDUCTANCE: Dim = [1, 2, -2, -2, 0, 0, 0];
+const MAGNETIC_FLUX: Dim = [1, 2, -2, -1, 0, 0, 0];
+const FLUX_DENSITY: Dim = [1, 0, -2, -1, 0, 0, 0];
+const ANGLE_DIM: Dim = [0, 0, 0, 0, 1, 0, 0];
+const ANGULAR_SPEED: Dim = [0, 0, -1, 0, 1, 0, 0];
 /// A difference in temperature, in kelvin.
-const TEMPERATURE: Dim = [0, 0, 0, 0, 0, 1];
+const TEMPERATURE: Dim = [0, 0, 0, 0, 0, 1, 0];
 /// Kelvin per watt.
-const THERMAL_RESISTANCE: Dim = [-1, -2, 3, 0, 0, 1];
+const THERMAL_RESISTANCE: Dim = [-1, -2, 3, 0, 0, 1, 0];
+const AMOUNT: Dim = [0, 0, 0, 0, 0, 0, 1];
 
 #[derive(Clone, Copy, Debug)]
 struct Quantity {
@@ -237,6 +240,95 @@ const FOOT: f64 = 0.3048;
 const POUND: f64 = 0.453_592_37;
 const POUND_FORCE: f64 = 4.448_221_615_260_5;
 const US_GALLON: f64 = 3.785_411_784e-3;
+/// The charge on an electron, in coulombs, and so one electronvolt in
+/// joules. Exact, by the definition of the ampere.
+const ELECTRON_CHARGE: f64 = 1.602_176_634e-19;
+/// Joules per kelvin. Exact, by the definition of the kelvin.
+const BOLTZMANN: f64 = 1.380_649e-23;
+/// Per mole. Exact, by the definition of the mole.
+const AVOGADRO: f64 = 6.022_140_76e23;
+
+// ---- constants --------------------------------------------------------------
+//
+// The constants of physics that typed input may use by name. Each is typed
+// with its subscript, with or without the underscore: `k_B` or `kB`. None
+// of the names is a unit or was answered before, so nothing that was
+// answered changes; a single letter such as `c`, `q` or `g` is left to be
+// the user's own name, or the unit it already is.
+//
+// A constant behaves as a value kept for the session does (`Session`): it
+// is read where its name stands alone, and listed beneath an answer that
+// used it, so the value that went in is seen. A value given after a
+// formula under the same name takes its place for that input.
+//
+// Typed input only. A program's steps have the names the program gives.
+
+struct Constant {
+    names: &'static [&'static str],
+    /// In SI base units.
+    value: f64,
+    dim: Dim,
+    /// The unit it is shown in beneath an answer, and when typed alone.
+    unit: &'static str,
+    /// An energy worked out with it is in joules, not newton metres.
+    joules: bool,
+}
+
+/// From the 2022 CODATA values. All are exact by definition but the
+/// permittivity and permeability of free space, which are measured.
+static CONSTANTS: &[Constant] = &[
+    Constant {
+        names: &["k_B", "kB"],
+        value: BOLTZMANN,
+        dim: [1, 2, -2, 0, 0, -1, 0],
+        unit: "J/K",
+        joules: true,
+    },
+    Constant { names: &["q_e", "qe"], value: ELECTRON_CHARGE, dim: CHARGE, unit: "C", joules: true },
+    Constant { names: &["c_0", "c0"], value: 299_792_458.0, dim: SPEED, unit: "m/s", joules: true },
+    Constant { names: &["g_0", "g0"], value: 9.806_65, dim: ACCELERATION, unit: "m/s²", joules: false },
+    Constant {
+        names: &["eps_0", "eps0", "ε_0", "ε0"],
+        value: 8.854_187_818_8e-12,
+        dim: [-1, -3, 4, 2, 0, 0, 0],
+        unit: "F/m",
+        joules: true,
+    },
+    Constant {
+        // Both letters that look like a mu: the Greek one and the micro sign.
+        names: &["mu_0", "mu0", "μ_0", "μ0", "µ_0", "µ0"],
+        value: 1.256_637_061_27e-6,
+        dim: [1, 1, -2, -2, 0, 0, 0],
+        unit: "H/m",
+        joules: true,
+    },
+    Constant {
+        names: &["h_P", "hP"],
+        value: 6.626_070_15e-34,
+        dim: [1, 2, -1, 0, 0, 0, 0],
+        unit: "J·s",
+        joules: true,
+    },
+    Constant {
+        names: &["N_A", "NA"],
+        value: AVOGADRO,
+        dim: [0, 0, 0, 0, 0, 0, -1],
+        unit: "mol⁻¹",
+        joules: false,
+    },
+    Constant {
+        // The Boltzmann constant for a mole.
+        names: &["R_gas", "Rgas"],
+        value: BOLTZMANN * AVOGADRO,
+        dim: [1, 2, -2, 0, 0, -1, -1],
+        unit: "J/(mol·K)",
+        joules: true,
+    },
+];
+
+fn constant(name: &str) -> Option<&'static Constant> {
+    CONSTANTS.iter().find(|constant| constant.names.contains(&name))
+}
 
 /// `m` (metre) must stay first: `METRE` below is its index.
 static UNITS: &[Unit] = &[
@@ -259,6 +351,14 @@ static UNITS: &[Unit] = &[
     energy_hint(unit(&["W"], 1.0, POWER, true, Neutral)),
     energy_hint(unit(&["J"], 1.0, ENERGY, true, Neutral)),
     energy_hint(unit(&["Wh"], 3600.0, ENERGY, true, Neutral)),
+    // The electronvolt, with the prefixes it is met with as units of
+    // their own. None takes a prefix, so an answer in electronvolts stays
+    // in the one typed, as an answer in bar does.
+    energy_hint(unit(&["eV"], ELECTRON_CHARGE, ENERGY, false, Neutral)),
+    energy_hint(unit(&["meV"], ELECTRON_CHARGE * 1e-3, ENERGY, false, Neutral)),
+    energy_hint(unit(&["keV"], ELECTRON_CHARGE * 1e3, ENERGY, false, Neutral)),
+    energy_hint(unit(&["MeV"], ELECTRON_CHARGE * 1e6, ENERGY, false, Neutral)),
+    energy_hint(unit(&["GeV"], ELECTRON_CHARGE * 1e9, ENERGY, false, Neutral)),
     energy_hint(unit(&["hp"], 745.699_871_582_27, POWER, false, Mechanical)),
     energy_hint(unit(&["PS"], 735.498_75, POWER, false, Mechanical)),
     // Length
@@ -300,6 +400,8 @@ static UNITS: &[Unit] = &[
     // Speed
     unit(&["mph"], 0.447_04, SPEED, false, Mechanical),
     unit(&["km/h", "kph"], 1.0 / 3.6, SPEED, false, Mechanical),
+    // Amount of substance
+    unit(&["mol", "mole", "moles"], 1.0, AMOUNT, true, Neutral),
 ];
 
 const METRE: usize = 0;
@@ -1813,6 +1915,7 @@ fn shown_by_default(value: f64, dim: Dim, joules: bool) -> Option<Answer> {
         (LENGTH, "m"),
         (FORCE, "N"),
         (PRESSURE, "Pa"),
+        (AMOUNT, "mol"),
     ];
     const BEST: &[(Dim, &[(f64, &str)])] = &[
         (TIME, &[(1e-9, "ns"), (1e-6, "µs"), (1e-3, "ms"), (1.0, "s")]),
@@ -2051,6 +2154,7 @@ const KINDS: &[(Dim, &str)] = &[
         (ANGULAR_SPEED, "a rotation speed"),
         (TEMPERATURE, "a temperature"),
         (THERMAL_RESISTANCE, "a thermal resistance"),
+        (AMOUNT, "an amount of substance"),
 ];
 
 /// What a quantity with these dimensions is called.
@@ -2394,9 +2498,13 @@ fn unit_or_name(tokens: &[Token], finding: Option<&str>) -> Option<String> {
 }
 
 /// The first value written with a prefix and no unit, as typed: `4.7k`.
-fn prefix_without_unit(tokens: &[Token]) -> Option<String> {
+/// A lone `K` may be kelvin and not a prefix at all, so it is looked for
+/// apart from the rest: only it with `kelvin`, and never it without.
+fn prefix_without_unit(tokens: &[Token], kelvin: bool) -> Option<String> {
     tokens.windows(2).find_map(|pair| match pair {
-        [Token::Number(value), Token::Word(word)] if matches!(lookup(word), Some(Suffix::BarePrefix(_))) => {
+        [Token::Number(value), Token::Word(word)]
+            if matches!(lookup(word), Some(Suffix::BarePrefix(_))) && (word == "K") == kelvin =>
+        {
             Some(format!("{value}{word}"))
         }
         _ => None,
@@ -2537,10 +2645,18 @@ impl Form<'_> {
             if parts[..sides].iter().any(|tokens| conversion_split(tokens).is_some()) {
                 return Err(None);
             }
-            if let Some(text) = parts[..sides].iter().find_map(|tokens| prefix_without_unit(tokens)) {
+            if let Some(text) = parts[..sides].iter().find_map(|tokens| prefix_without_unit(tokens, false)) {
                 return Err(Some(Why::NoUnit(text)));
             }
         }
+        // A lone `K` is kilo or kelvin. As kilo it has no unit and is
+        // refused; as kelvin (`n * R_gas * 300 K`) the equation may make
+        // sense. If it does not, the missing unit is the reason given.
+        let lone_k = if self.equation {
+            parts[..sides].iter().find_map(|tokens| prefix_without_unit(tokens, true))
+        } else {
+            None
+        };
 
         // Whether the work is electrical or mechanical, from the units of
         // every part. It settles a lone `m` anywhere in the input.
@@ -2646,7 +2762,7 @@ impl Form<'_> {
         let Some(finding) = finding else {
             // Nothing is being found. If the two sides can be compared as
             // they stand, every value was given.
-            return Err(apart(known.clone()).map(|_| Why::NothingToSolve));
+            return Err(apart(known.clone()).map(|_| Why::NothingToSolve).or(lone_k.map(Why::NoUnit)));
         };
         let with = |x: Quantity| {
             let mut names = known.clone();
@@ -2662,7 +2778,7 @@ impl Form<'_> {
             .map(|(dim, _)| *dim)
             .filter(|dim| TRIALS.iter().any(|&x| with(Quantity::of(x, *dim)).is_some()));
         let Some(dim) = kinds.next() else {
-            return Err(Some(Why::NoKind(finding.to_string())));
+            return Err(Some(lone_k.map_or_else(|| Why::NoKind(finding.to_string()), Why::NoUnit)));
         };
         if kinds.next().is_some() {
             return Err(None);
@@ -2828,8 +2944,8 @@ fn given_parts(formula: &str, values: &[(&str, &str)], session: &Session) -> Res
             if let Some(result) = one_of(&alone) {
                 return result;
             }
-            if let Err(Some(Why::NothingToSolve)) = form.work_out(None) {
-                return Err(Some(Why::NothingToSolve));
+            if let Err(Some(why @ (Why::NothingToSolve | Why::NoUnit(_)))) = form.work_out(None) {
+                return Err(Some(why));
             }
             one_of(&in_a_run).unwrap_or_else(|| {
                 let lone_x = form.texts.iter().any(|(_, text)| has_lone_x(text));
@@ -3287,6 +3403,12 @@ pub fn evaluate_with_value_in(input: &str, kept: &[Kept]) -> Option<(Answer, f64
     // given earlier. A kept name alone shows its value, with nothing
     // beneath: the line would only say the same again.
     if session.used_in(&tokens) {
+        // A constant alone shows its value, in its own unit.
+        if let [Token::Name(name)] = &tokens[..]
+            && let Some(constant) = constant(name)
+        {
+            return Some((shown_as_is(constant.value, constant.unit), constant.value));
+        }
         let lone = matches!(tokens[..], [Token::Name(_)]);
         return given_parts(whole, &[], &session).ok().map(|outcome| finished(outcome, false, lone));
     }
@@ -3382,6 +3504,14 @@ impl Session {
     /// entry that could not have come from `keep` is left out.
     fn of(kept: &[Kept]) -> Self {
         let mut session = Session::default();
+        // The constants come first, under each of their names. Nothing
+        // kept can have one of those names (`keepable_name`).
+        for constant in CONSTANTS {
+            for name in constant.names {
+                session.names.push((name.to_string(), Quantity::of(constant.value, constant.dim)));
+                session.hints.push(Hints { joules: constant.joules, ..Hints::default() });
+            }
+        }
         for entry in kept {
             let sound = keepable_name(&entry.name).is_ok()
                 && entry.value.is_finite()
@@ -3425,6 +3555,10 @@ impl Session {
     /// A kept value as it is shown beneath an answer that used it:
     /// `10.00 kΩ`.
     fn say(&self, name: &str) -> Option<String> {
+        // A constant is given in its own unit, with no prefix.
+        if let Some(constant) = constant(name) {
+            return Some(format!("{} {}", shown_as_is(constant.value, "").number, constant.unit));
+        }
         let at = self.names.iter().position(|(known, _)| known == name)?;
         let quantity = self.names[at].1;
         let names = [(name.to_string(), quantity)];
@@ -3456,7 +3590,7 @@ impl Session {
 /// function or a constant. A prefix alone means nothing, so `k`, `f` and
 /// `T` are names like any other.
 fn keepable_name(name: &str) -> Result<(), Why> {
-    if !is_valid_name(name) || is_complex_function(name) || matches!(name, "j" | "π") {
+    if !is_valid_name(name) || is_complex_function(name) || matches!(name, "j" | "π") || constant(name).is_some() {
         return Err(Why::NameTaken(name.to_string()));
     }
     if is_unit_alone(name) || level(name).is_some() || is_gain(name) {
@@ -3539,9 +3673,15 @@ fn kept_value(
             hints.add(kept);
         }
     }
-    // Read as a value, so that it need not be one the window could show.
-    // It is named, so a prefix with no unit is refused.
+    // Where the input is answered as it stands, the answer is the value. It
+    // is named, so a prefix with no unit is refused.
     let split = conversion_split(&tokens);
+    let shown = Part { names: &session.names, hints: &hints, value_only: false };
+    if let Some(outcome) = reading_named(&tokens, split, true, &shown) {
+        return keepable(outcome);
+    }
+    // Otherwise it is read as a value, which need not be one the window
+    // could show.
     let expression = split.map_or(&tokens[..], |at| &tokens[..at]);
     let part = Part { names: &session.names, hints: &hints, value_only: true };
     let outcome = reading_named(expression, None, true, &part)?;
@@ -4556,6 +4696,9 @@ mod tests {
         check_in(&kept, "R", "8.000 Ω", None);
         check_in(&kept, "d1 * 2 to mm", "101.6 mm", Some("d1 = 2.000 in"));
         check_in(&kept, "T1 + 10 K", "110.0 °C", Some("T1 = 100.0 °C"));
+        // A lone `m` that the answer on screen read as metres.
+        let kept = session(&["g1 = 9.81 m/s^2"]);
+        check_in(&kept, "5 kg * g1", "49.05 N", Some("g1 = 9.810 m/s²"));
     }
 
     #[test]
@@ -4565,6 +4708,7 @@ mod tests {
         not_kept(&[], "V = 12V", "V is a unit, so it cannot be kept. Use a name such as V1.");
         not_kept(&[], "C = 100nF", "C is a unit, so it cannot be kept. Use a name such as C1.");
         not_kept(&[], "m = 5 kg", "m is a unit, so it cannot be kept. Use a name such as m1.");
+        not_kept(&[], "g = 9.81 m/s^2", "g is a unit, so it cannot be kept. Use a name such as g1.");
         not_kept(&[], "K = 300 K", "K is a unit, so it cannot be kept. Use a name such as K1.");
         not_kept(&[], "mA = 2", "mA is a unit, so it cannot be kept. Use a name such as mA1.");
         not_kept(&[], "dB = 3", "dB is a unit, so it cannot be kept. Use a name such as dB1.");
@@ -4681,11 +4825,11 @@ mod tests {
         // An entry that `keep` could not have made is left out, not used.
         let forged: Vec<Kept> = serde_json::from_str(
             r#"[
-                {"name": "V", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0]},
-                {"name": "sin", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0]},
-                {"name": "a1", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0], "hints": {"typed": [[9999, 1]]}},
-                {"name": "a2", "value": 5.0, "dim": [1, 0, 0, 0, 0, 0], "reading": "Celsius"},
-                {"name": "ok", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0]}
+                {"name": "V", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0, 0]},
+                {"name": "sin", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0, 0]},
+                {"name": "a1", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0, 0], "hints": {"typed": [[9999, 1]]}},
+                {"name": "a2", "value": 5.0, "dim": [1, 0, 0, 0, 0, 0, 0], "reading": "Celsius"},
+                {"name": "ok", "value": 5.0, "dim": [0, 0, 0, 0, 0, 0, 0]}
             ]"#,
         )
         .unwrap();
@@ -4693,6 +4837,130 @@ mod tests {
         assert_eq!(show_in(&forged, "a1 * 2"), None);
         assert_eq!(show_in(&forged, "a2 * 2"), None);
         check_in(&forged, "ok * 2", "10.00", Some("ok = 5.000"));
+    }
+
+    #[test]
+    fn constants_of_physics() {
+        // Alone, a constant shows its value in its own unit.
+        check("k_B", "1.381e-23 J/K");
+        check("q_e", "1.602e-19 C");
+        check("c_0", "2.998e8 m/s");
+        check("g_0", "9.807 m/s²");
+        check("eps_0", "8.854e-12 F/m");
+        check("mu_0", "1.257e-6 H/m");
+        check("h_P", "6.626e-34 J·s");
+        check("N_A", "6.022e23 mol⁻¹");
+        check("R_gas", "8.314 J/(mol·K)");
+        // With or without the underscore, and the Greek letters.
+        for (short, long) in [
+            ("kB", "k_B"),
+            ("qe", "q_e"),
+            ("c0", "c_0"),
+            ("g0", "g_0"),
+            ("eps0", "eps_0"),
+            ("ε0", "eps_0"),
+            ("ε_0", "eps_0"),
+            ("mu0", "mu_0"),
+            ("μ0", "mu_0"),
+            ("µ_0", "mu_0"),
+            ("hP", "h_P"),
+            ("NA", "N_A"),
+            ("Rgas", "R_gas"),
+        ] {
+            assert_eq!(show(short), show(long), "for {short:?}");
+            assert!(show(short).is_some(), "for {short:?}");
+        }
+        // In use, with the value that went in on the line beneath.
+        let none: &[Kept] = &[];
+        check_in(none, "k_B * 300 K / q_e", "25.85 mV", Some("k_B = 1.381e-23 J/K, q_e = 1.602e-19 C"));
+        check_in(none, "kB * 300 K / qe", "25.85 mV", Some("kB = 1.381e-23 J/K, qe = 1.602e-19 C"));
+        check_in(none, "5 kg * g0", "49.03 N", Some("g0 = 9.807 m/s²"));
+        check_in(none, "1 kg * c_0^2", "8.988e16 J", Some("c_0 = 2.998e8 m/s"));
+        check_in(none, "eps_0 * 1 cm^2 / 1 mm", "885.4 fF", Some("eps_0 = 8.854e-12 F/m"));
+        check_in(none, "mu_0 * 100^2 * 1 cm^2 / 5 cm", "25.13 µH", Some("mu_0 = 1.257e-6 H/m"));
+        check_in(none, "sqrt(mu_0 / eps_0)", "376.7 Ω", Some("mu_0 = 1.257e-6 H/m, eps_0 = 8.854e-12 F/m"));
+        check("1 / sqrt(eps_0 * mu_0)", "2.998e8 m/s");
+        check("h_P * c_0 / 650 nm to eV", "1.907 eV");
+        check("q_e * 1e18 / 1 s", "160.2 mA");
+        check("R_gas * 1 mol * 300 K", "2.494 kJ");
+        check("1 mol * R_gas * 273.15 K / 1 atm", "22.41 L");
+        check("N_A * 2 mol", "1.204e24");
+        // The gas constant is the Boltzmann constant for a mole.
+        check("R_gas / (k_B * N_A)", "1.000");
+        // In a formula with its values, and in an equation.
+        check("Vt = k_B * T / q_e, T = 300 K", "25.85 mV");
+        check("h_P * c_0 / lambda = 2 eV", "619.9 nm");
+        check("F = m * g0, m = 5 kg", "49.03 N");
+        // The rules for a named answer hold where a constant is used.
+        why("4.7k * q_e", "4.7k has a prefix but no unit.");
+        why("k_B * 27 C", "A temperature cannot be multiplied or divided. A difference in K can.");
+        // Straight after a number a word is not a name.
+        refuse("2 c0");
+        // An answer that used one is not offered to Claude to check, as
+        // for a kept value.
+        assert!(!evaluate("Vt = k_B * T / q_e, T = 300 K").unwrap().given);
+    }
+
+    #[test]
+    fn a_constant_takes_no_name_that_meant_something() {
+        // A single letter is the unit it was, or still nothing.
+        check("g * 2", "2.000 g");
+        check("h * 2", "2.000 h");
+        check("5 g", "5.000 g");
+        silent("c * 2");
+        silent("q * 2");
+        silent("k * 300 K");
+        // A value given after a formula under a constant's name is that
+        // value, for that input, as it was before there were constants.
+        check("E = m * c^2, m = 1 kg, c = 3e8 m/s", "9.000e16 N·m");
+        check("y = k_B * 2, k_B = 3", "6.000");
+        check("y = a * c0, a = 2, c0 = 3", "6.000");
+        assert!(evaluate("y = k_B * 2, k_B = 3").unwrap().given);
+        // Nothing can be kept under a constant's name.
+        not_kept(&[], "k_B = 5", "k_B already means something here, so it cannot name a value.");
+        not_kept(&[], "c0 = 3e8", "c0 already means something here, so it cannot name a value.");
+        // A value worked out with one can be kept under another name.
+        let kept = session(&["Vt = k_B * 300 K / q_e", "kT = k_B * 300 K"]);
+        check_in(&kept, "Vt * 2", "51.70 mV", Some("Vt = 25.85 mV"));
+        check_in(&kept, "kT / q_e", "25.85 mV", Some("kT = 4.142e-21 J, q_e = 1.602e-19 C"));
+        // A program's steps have only the names the program gives them.
+        assert!(run(&[expression("E", "k_B * 300")]).is_err());
+        assert!(run(&[expression("E", "2 * c0")]).is_err());
+    }
+
+    #[test]
+    fn electronvolts_and_moles() {
+        check("5 eV", "5.000 eV");
+        check("5 eV to J", "8.011e-19 J");
+        check("2 eV + 3 eV", "5.000 eV");
+        check("3 meV * 2", "6.000 meV");
+        check("1 MeV to J", "1.602e-13 J");
+        check("1.5 keV + 500 eV to keV", "2.000 keV");
+        check("13.6 eV / q_e", "13.60 V");
+        check("k_B * 300 K to meV", "25.85 meV");
+        check("1 J to eV", "6.242e18 eV");
+        // Mixed, it is in joules, as pressures mixed are in pascals.
+        check("1.5 keV + 500 eV", "3.204e-16 J");
+        check("2 mol", "2.000 mol");
+        check("1.5 mmol * 2", "3.000 mmol");
+        check("3 moles / 2", "1.500 mol");
+        why("2 mol + 1", "An amount of substance and a plain number cannot be added.");
+        why("2 mol + 3 V", "An amount of substance and a voltage cannot be added.");
+        // A unit with no name of its own is refused, as ever.
+        refuse("18 g / 1 mol");
+        refuse("0.5 mol / 2 L");
+        // An amount is a kind that an equation can be solved for.
+        check("2 atm * 10 L = n * R_gas * 300 kelvin", "812.4 mmol");
+    }
+
+    #[test]
+    fn a_lone_k_in_an_equation_may_be_kelvin() {
+        // As kilo it has no unit. As kelvin the equation makes sense.
+        check("P * 1 L = n * R_gas * 300 K, n = 1 mol", "2.494 MPa");
+        check("2 W * Rth = 40 K", "20.00 K/W");
+        // Where it makes sense neither way, the missing unit is the reason.
+        why("12V = I * 4.7K", "4.7K has a prefix but no unit.");
+        why("2 + 2K = 2002", "2K has a prefix but no unit.");
     }
 
     #[test]
