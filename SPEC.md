@@ -18,8 +18,8 @@ revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
-becomes a last resort. Its first six slices are built (2026-11-23), and
-none is released yet; 0.12.0 to 0.16.0 were never tagged.
+becomes a last resort. All seven of its slices are built (2026-11-23 and
+24), and none is released yet; 0.12.0 to 0.17.0 were never tagged.
 0.12.0: on Enter, the app says why it refused an input, where it knows for
 certain (see "Saying why" under "Instant path"). 0.13.0: a formula with
 its values after it is answered as you type (see "Values after a
@@ -31,8 +31,10 @@ constants of physics by name, and the electronvolt and the mole as units
 (see "Constants and units for science"). 0.17.0: the nearest standard
 value (`to E12`), a tolerance as a range (`± 5%`), and hexadecimal and
 binary (see "Helpers for the trade").
-Next: the seventh slice, steps for answers the engine gives by itself,
-which is not designed yet.
+0.18.0: an instant answer with named values in it has Steps, made by the
+engine with no model (see "Steps for instant answers").
+That is the last slice listed under "Hardening the engine". Next on the
+roadmap is item 2, macOS, which starts with a short trial on a real Mac.
 
 ## Purpose
 
@@ -115,7 +117,7 @@ behind the "show steps" caret.
 | Model | Default: Sonnet 5.5 at low effort, chosen on accuracy (see "Solver"). A settings dropdown offers others. Haiku 5.5 is about 15 times cheaper but was not accurate enough to be the default. |
 | Context | Stateless. Every Enter is a fresh problem. No follow-up context in v1. |
 | History | Up and down arrows recall earlier inputs from the current session. Held in memory only; gone when the app quits; never written to disk. |
-| Trust | Every answer from Claude shows one small line with the formula it used (`F = P × A, extend stroke`). Instant answers stay bare. The line is what lets a user check an AI answer without opening the steps, and it marks which answers came from AI. |
+| Trust | Every answer from Claude shows one small line with the formula it used (`F = P × A, extend stroke`). Instant answers stay bare. The line is what lets a user check an AI answer without opening the steps, and it marks which answers came from AI. **Revised 2026-11-24, in 0.18.0:** an instant answer with named values in it has the Steps control and nothing else. It never has the formula line, which stays the mark of an AI answer. See "Steps for instant answers". |
 | Input | Text and pasted images (formula or schematic screenshots). |
 | Steps | Generated in the same request as the answer, streamed behind a "show steps" caret. Each step is the maths on the left and a very short plain note on the right saying what was done ("divide", "put in R and C"). The note is one to five words, longer only when there is room. |
 | Look | Terminal style: monospace text, orange for the prompt, focus and hover. The theme follows Windows (dark shell when Windows is dark, light when light), with a manual override in settings. Flags are yellow on a filled strip, so they are never confused with the orange accent. |
@@ -732,6 +734,115 @@ Rules:
 Not in the instant path: the decimal comma, and a plain ratio in
 decibels. Those go to Claude. Values that last from one input to the next
 were on this list until 0.15.0.
+
+### Steps for instant answers (0.18.0)
+
+The seventh slice of "Hardening the engine". An instant answer with named
+values in it has the Steps control that Claude's answers have. The steps
+are made by the engine, with no model. The design, and the four choices
+the user made on 2026-11-24, are under "Steps without a model" in
+"Hardening the engine"; this is what was built from it.
+
+Each step is the working, a note, and the value:
+
+| Input | Steps |
+|---|---|
+| `Vout = Vin * R2 / (R1 + R2), Vin = 5 V, R1 = 4.7kohm, R2 = 10kohm` | `Vin = 5 V`, given, 5.000 V |
+| | `R1 = 4.7kohm`, given, 4.700 kΩ |
+| | `R2 = 10kohm`, given, 10.00 kΩ |
+| | `Vout = 5.000 V × 10.00 kΩ / (4.700 kΩ + 10.00 kΩ)`, values put in, 3.401 V |
+| `Ic = beta * Ib, Ib = Vb / Rb, beta = 200, Vb = 4.3 V, Rb = 430kohm` | the three values given, then |
+| | `Ib = 4.300 V / 430.0 kΩ`, values put in, 10.00 µA |
+| | `Ic = 200.0 × 10.00 µA`, values put in, 2.000 mA |
+| `fc = 1/(2*pi*R*C), fc = 10 Hz, R = 1Mohm` | the two values given, then |
+| | `C`, found by trial, 15.92 nF |
+| | `10.00 Hz = 1/(2 × π × 1.000 MΩ × 15.92 nF)`, put back, 10.00 Hz = 10.00 Hz |
+| `Vth = Vcc * R2 / (R1 + R2)`, with all three kept | `Vcc`, kept, 9.000 V; and `R2` and `R1` likewise |
+| | `Vth = 9.000 V × 22.00 kΩ / (10.00 kΩ + 22.00 kΩ)`, values put in, 6.188 V |
+| `k_B * 300 K / q_e` | `k_B`, constant, 1.381e-23 J/K; `q_e`, constant, 1.602e-19 C |
+| | `(1.381e-23 J/K) × 300 K / 1.602e-19 C`, values put in, 25.85 mV |
+| `R = (V - Vf) / I to E24, V = 5 V, Vf = 2.1 V, I = 20 mA` | the three values given, then |
+| | `R = (5.000 V - 2.100 V) / 20.00 mA`, values put in, 145.0 Ω |
+| | `145.0 Ω to E24`, standard value, 150 Ω |
+
+**Which answers have them:** a formula with its values after it, input
+that uses kept values or constants, and a solved equation. Not a plain
+sum, with brackets or without; not an answer with only a name in front;
+and not a kept value or a constant alone, with a helper on the end or
+without (`R1`, `R1 to E6`), since nothing is put into it.
+
+**What a step is** (`Worked` in `calc.rs`):
+
+- **A value given after the formula:** as typed, "given", and the value as
+  the engine read it. One worked out from other values has them put in,
+  and "values put in".
+- **A kept value or a constant the answer used:** its name, "kept" or
+  "constant", and its value.
+- **The formula:** with the values in place of the names, "values put in",
+  and the answer. Under the name in front, if there is one.
+- **An equation:** the name of the value found, "found by trial", and the
+  value; then the equation with the values put back into both sides, "put
+  back", and what each side comes to.
+
+How it is done, and what follows from that:
+
+- **The steps are made after the answer, from what working it out found**
+  (`Trace`, `Form::account`). Nothing that makes them can change the
+  number, and where they cannot be made the answer has no Steps control.
+- **A value is put in where its name was typed.** The lexer now says
+  where each token begins (`lex_marked`), and the rest of the text is left
+  as typed. So a number the user typed stays as they typed it (`300 K`,
+  `0.5`), and the window tidies it as it tidies Claude's working.
+- **A value goes in brackets where it would read wrongly without:** one
+  below zero, one raised to a power (`(12.00 V)^2`), and one with a `/` in
+  its unit (`(9.810 m/s²)`).
+- **The values put in are rounded for showing; the answer is not worked
+  out from them.** Worked by hand from the last line, a result can differ
+  in its last figure.
+- **A value with a unit that has no name** is written in SI base units and
+  labelled `(SI)`, as a step of a program is: `k = 50 N/m` is
+  "50.00 (SI)".
+- **Steps read downward.** A value comes after those it uses, and in an
+  equation the values that depend on the one found come after it.
+- **A helper on the end keeps its own line beneath the answer.** The steps
+  stop at the value worked out, with one more step for a standard value.
+  A unit asked for (`to mW`) is part of the working and stays in it.
+- **Of two answers that differ only in sign,** the positive one is put
+  back, and the other is still on the line beneath the answer.
+
+In the window (`main.ts`):
+
+- **The Steps control and nothing else.** No formula line: that stays the
+  mark of an answer from Claude. The line of kept values beneath the
+  answer is there whether the steps are open or not.
+- **The steps close when the input changes,** on the first key, since they
+  are of the input as it was. Claude's steps stay open over a dimmed
+  answer, as before.
+- A step may have no name (a formula with none in front, an equation) or
+  no working (a kept value, a constant, a value found); the window leaves
+  out the `=` between them. A step with both sides shows them as
+  `10.00 Hz = 10.00 Hz`.
+- **Enter is unchanged.**
+
+Not done: a step for each bracket of a formula or of a plain sum, which
+was offered and not chosen; and any account of how an equation's value
+was found beyond "by trial".
+
+Checked for 0.18.0 (2026-11-24): 106 unit tests, of which six groups are
+new (the steps of a formula with its values, of an equation, with kept
+values and constants, that they stop before a helper, what has no steps,
+and where each token begins), and the 100 from before pass unchanged, so
+no answer has changed; every reference problem through the instant path
+alone, which answers the same six as 0.17.0; and the window in the
+built-in browser, where a plain sum has no Steps control, a formula with
+its values has one and no formula line, the steps open above the answer as
+Claude's do, an equation's last step shows both sides, the line of kept
+values stays beneath the answer with the steps open, a standard value has
+its extra step, the steps close on the first change to the input, and an
+answer shaped like Claude's (a stand-in, with no question sent) still
+shows its steps and its formula line. Not checked: the real app, and a
+real answer from Claude. The instructions to Claude are unchanged, so the
+reference set was not run through a model.
 
 ### Helpers for the trade (0.17.0)
 
@@ -2233,7 +2344,9 @@ types.
    answer with a tolerance on the end; the range of an answer worked out
    from several values with tolerances is not done.*
 7. **Steps for answers the engine gives by itself** (asked about by the
-   user 2026-11-23; found possible, not designed). See below.
+   user 2026-11-23; designed with them 2026-11-24). *Built 2026-11-24, in
+   0.18.0: see "Steps without a model" below for the design, and "Steps
+   for instant answers" under "Instant path" for what was built.*
 
 A **formula library** (type "rc cutoff" and be given the formula to fill
 in) is the largest piece and comes after the rest. It is what would take
@@ -2255,8 +2368,73 @@ that carries them, so the work is in the engine:
   as a check.
 - "Trust" under "Settled decisions" says instant answers stay bare and
   that the formula line marks an answer as the model's. Steps on local
-  answers must not blur that. To be decided with the user before it is
-  built.
+  answers must not blur that.
+
+**The design, decided with the user on 2026-11-24, and built that day in
+0.18.0.** Four things were put to them, and they chose as follows.
+
+- **Which answers get the Steps control: those with named values in
+  them.** A formula with its values after it, input that uses kept values
+  or constants, and a solved equation. A plain sum stays bare, with or
+  without brackets (`9V * 4.7k / (10k + 4.7k)`), and so does an answer
+  that has only a name in front (`VGS = -0.3V * …`, `R1 = 10kohm`), which
+  has nothing to put in. A step for each bracket of a plain sum was
+  offered and not chosen.
+- **How far the working is broken down: the values put in, and no
+  further.** Each value is a step, as the engine read it, and the last
+  step is the formula with the values in place of the names. The formula's
+  own brackets are not worked out one by one.
+
+  For `Vout = Vin * R2 / (R1 + R2), Vin = 5 V, R1 = 4.7kohm, R2 = 10kohm`:
+
+  | Working | Note | Value |
+  |---|---|---|
+  | `Vin = 5 V` | given | 5.000 V |
+  | `R1 = 4.7kohm` | given | 4.700 kΩ |
+  | `R2 = 10kohm` | given | 10.00 kΩ |
+  | `Vout = 5.000 V × 10.00 kΩ / (4.700 kΩ + 10.00 kΩ)` | values put in | 3.401 V |
+
+- **A solved equation shows the value put back.** It is found by trial, so
+  there is no algebra to show. The steps give the value found, with a note
+  that says so, and then the equation with that value in it and what each
+  side comes to, as a check that can be read:
+  `10 Hz = 1 / (2π × 1 MΩ × 15.92 nF)`, 10.00 Hz on both sides.
+- **Telling them from Claude's: no formula line.** A local answer gains
+  the Steps control and nothing else. The notes are a few fixed words from
+  the engine. Nothing new is added to the window. Leaving the notes off
+  local steps, and a line in the steps saying no AI was used, were offered
+  and not chosen.
+
+What follows from those, settled here so the build need not ask again.
+Say so to the user if any of it turns out wrong in the building.
+
+- **The notes are fixed words:** "given" for a value typed after the
+  formula, "kept" for one kept for the session, "constant" for a constant,
+  "values put in" for a formula or a value worked out from other values,
+  "found by trial" and "put back" for an equation. Claude's notes are
+  Claude's words; these never come from a model.
+- **Steps read downward.** A value that uses other values comes after
+  them, whatever order they were typed in, and is shown with its own
+  values put in.
+- **A value is written as the engine shows it,** to the figures in force
+  and with its prefix (`4.700 kΩ`), so the steps show how each unit and
+  prefix was read. A value with a unit that has no name is written in SI
+  base units and labelled so, as a step of a program is.
+- **The line of kept values and constants beneath the answer stays.** It
+  is what stops a value kept some time ago being used unseen, and it must
+  not depend on the steps being open.
+- **A helper on the end** (`to E24`, `+/- 5%`, `to hex`) keeps its own
+  line beneath the answer. The steps end at the value worked out, with
+  one more step for a standard value, since the answer is then not that
+  value.
+- **The steps close when the input changes,** as they do now when a new
+  answer arrives, so typing never makes the window jump.
+- **Enter is unchanged.** It keeps a named answer, and has Claude check a
+  formula with its values. Claude's answer then has Claude's steps and the
+  formula line.
+- **Nothing here changes a number.** The steps are a second account of an
+  answer the engine has already given. If the steps cannot be made for an
+  input, it is answered with no Steps control, never refused for it.
 
 **What stays with a model:** a problem whose formula the user does not
 know and the library does not have; pictures; and flagging a formula as

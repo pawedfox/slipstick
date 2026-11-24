@@ -17,8 +17,8 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.17.0, not yet released; 0.11.0 is the current release
-(2026-11-22), and 0.12.0 to 0.16.0 were never tagged. Work follows
+Version 0.18.0, not yet released; 0.11.0 is the current release
+(2026-11-22), and 0.12.0 to 0.17.0 were never tagged. Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -29,7 +29,7 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   model, so that asking one is a last resort. Models that run on the
   user's own machine are dropped as an aim.
 - Item 1 of the roadmap is hardening the engine, in the slices under
-  "Hardening the engine" in `SPEC.md`. Six are built. In 0.12.0, on
+  "Hardening the engine" in `SPEC.md`. All seven are built. In 0.12.0, on
   Enter the app says why it refused an input, where it is certain
   (`why_not` in `calc.rs`; "Saying why" in `SPEC.md`). In 0.13.0, a
   formula with its values after it is answered as typed (`given` in
@@ -48,9 +48,11 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   gives the nearest standard value, `+/- 5%` on the end gives a range,
   and `0x` and `0b` numbers and `to hex` and `to bin` are read
   (`Series`, `Base` and the end of `attempt_noting` in `calc.rs`;
-  "Helpers for the trade" in `SPEC.md`). Next is the seventh slice,
-  steps for answers the engine gives by itself, which needs designing
-  with the user first. After
+  "Helpers for the trade" in `SPEC.md`). In 0.18.0, an instant answer
+  with named values in it has Steps, made by the engine with no model
+  (`Worked`, `Trace` and `Form::account` in `calc.rs`; "Steps for
+  instant answers" in `SPEC.md`, and the design the user chose under
+  "Steps without a model"). That was the last slice listed. After
   the engine come macOS, then one small
   provider-neutral route, then Linux, then a formula library. What was
   found is under "Models other than Claude" and "Other operating systems"
@@ -196,6 +198,14 @@ Run from the repo root unless noted.
   are a number only at the start of one, with a digit after
   (`based_number`); `2x3` must stay a multiplication. A tolerance comes
   last and is never read on a value inside a sum.
+  The steps of an instant answer (`Worked`) are made after the answer,
+  from what working it out found (`Trace`, `Form::account`). Keep it
+  that way: nothing that makes steps may change a number, and where
+  they cannot be made the answer simply has none. Every word in them is
+  the engine's or the user's, and the notes are a few fixed words. An
+  instant answer never gets the formula line, which marks an answer as
+  Claude's. `lex_marked` says where each token begins, which is how a
+  value is put where its name was typed.
   An equation is solved by search (`roots_of`), not by algebra. A value it
   returns has been put back into the equation, so it always fits; it may
   not be the only one, and two answers that are not a matching plus and

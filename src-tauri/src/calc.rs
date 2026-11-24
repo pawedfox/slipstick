@@ -164,12 +164,38 @@ pub struct Answer {
     /// shows them beneath it: `Vcc = 9.000 V, R1 = 10.00 kΩ`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uses: Option<String>,
+    /// The steps of an answer that has named values in it: each value as
+    /// it was read, then the formula with the values put in. The window
+    /// shows them behind its Steps control.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub steps: Option<Vec<Worked>>,
 }
 
 impl Answer {
     fn real(number: String, unit: String, copy: String) -> Self {
-        Self { number, unit, copy, angle: None, parts: None, given: false, uses: None }
+        Self { number, unit, copy, angle: None, parts: None, given: false, uses: None, steps: None }
     }
+}
+
+/// One step of an answer the engine gave by itself, as the window shows
+/// it: `name = text` with a note beside it, and the value beneath. Every
+/// word in it is the engine's or the user's own. No model has a part.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Worked {
+    /// The name the value has. Empty for a formula with no name in front,
+    /// and for an equation.
+    pub name: String,
+    /// What the value is worked out from, with values in place of names.
+    /// Empty for a value that was kept, a constant, and a value found.
+    pub text: String,
+    /// The value, as the engine shows it: `4.700 kΩ`.
+    pub value: String,
+    /// One of a few fixed words: `given`, `kept`, `values put in`.
+    pub note: String,
+    /// For an equation with its value put back: what the right-hand side
+    /// comes to, `value` being the left.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other: Option<String>,
 }
 
 /// A value kept under a name for the session: `R1 = 10kohm`, then `R1` in
@@ -563,11 +589,24 @@ fn mentions_base(text: &str) -> bool {
 }
 
 fn lex(text: &str, names: &[(String, Quantity)]) -> Option<Vec<Token>> {
+    lex_marked(text, names).map(|(tokens, _)| tokens)
+}
+
+/// As `lex`, and with each token the place in the text where it begins,
+/// counted in characters. A unit read with its number, as in `4k7`, has
+/// the number's place. The steps of a local answer use the places to put
+/// a value where its name was typed.
+fn lex_marked(text: &str, names: &[(String, Quantity)]) -> Option<(Vec<Token>, Vec<usize>)> {
     let chars: Vec<char> = text.chars().collect();
     let mut tokens = Vec::new();
+    let mut starts: Vec<usize> = Vec::new();
+    let mut began = 0;
     let mut i = 0;
 
     while i < chars.len() {
+        // Whatever the last turn of the loop read began where it began.
+        starts.resize(tokens.len(), began);
+        began = i;
         let c = chars[i];
         if c == '±' || chars[i..].starts_with(&['+', '/', '-']) {
             tokens.push(Token::PlusMinus);
@@ -619,7 +658,8 @@ fn lex(text: &str, names: &[(String, Quantity)]) -> Option<Vec<Token>> {
             return None;
         }
     }
-    Some(tokens)
+    starts.resize(tokens.len(), began);
+    Some((tokens, starts))
 }
 
 /// The end of the run of letters, digits and underscores starting at
@@ -2232,7 +2272,7 @@ fn in_base(number: u64, base: Option<Base>) -> Answer {
 fn with_bases(answer: Answer, quantity: Quantity) -> Answer {
     match whole_number(quantity) {
         Some(number) if answer.parts.is_none() && answer.angle.is_none() => {
-            Answer { given: answer.given, uses: answer.uses, ..in_base(number, None) }
+            Answer { given: answer.given, uses: answer.uses, steps: answer.steps, ..in_base(number, None) }
         }
         _ => answer,
     }
@@ -2263,6 +2303,9 @@ struct Outcome {
     /// The values kept for the session that were used, in the order they
     /// first appear.
     used: Vec<String>,
+    /// The steps, for an answer that has named values in it. Empty for
+    /// any other, and where the steps could not be made.
+    steps: Vec<Worked>,
 }
 
 /// What the units typed say about an input. It is carried from the values
@@ -2870,6 +2913,93 @@ struct Form<'a> {
     /// The values kept for the session. One given here under the same
     /// name takes its place.
     session: &'a Session,
+    /// The name in front of a formula, which is only the answer's name.
+    label: Option<&'a str>,
+}
+
+/// What working a form out found on the way. Its steps are made from this
+/// afterwards (`Form::account`), so that making them cannot change the
+/// answer.
+#[derive(Default)]
+struct Trace {
+    /// The values given, in the order they could be worked out, each with
+    /// what its units said.
+    values: Vec<(String, Quantity, Hints)>,
+    /// Every name the formula could use, kept or given, with its value.
+    names: Vec<(String, Quantity)>,
+    /// What the units of the whole input said.
+    hints: Hints,
+    found: Option<Found>,
+}
+
+/// The value an equation was solved for, put back into it.
+struct Found {
+    /// How many of the values given were known before it was found. The
+    /// rest are worked out from it.
+    before: usize,
+    left: Quantity,
+    right: Quantity,
+}
+
+/// An answer as a line of text: `10.05 kΩ ∠ −9.043°`.
+fn in_full(shown: &Answer) -> String {
+    match &shown.angle {
+        Some(angle) => format!("{} ∠ {angle}", spaced(shown)),
+        None => spaced(shown),
+    }
+}
+
+/// A value as the engine shows it, for the steps and for the line beneath
+/// an answer: `10.00 kΩ`. `hints` is what the units it was typed in said.
+fn spoken(quantity: Quantity, hints: &Hints) -> String {
+    let name = "value".to_string();
+    let names = [(name.clone(), quantity)];
+    let part = Part { names: &names, hints, value_only: false };
+    let shown = match reading_named(&[Token::Name(name)], None, false, &part) {
+        Some(outcome) => outcome.answer,
+        // A unit with no name of its own is given in SI base units and
+        // labelled as such, as it is for a step of a program.
+        None => shown_as_is(quantity.magnitude_or_value(), if quantity.dim == NO_DIM { "" } else { "(SI)" }),
+    };
+    in_full(&shown)
+}
+
+/// The text of a formula with each name in it replaced by its value, as
+/// far as the character at `upto`. `starts` is where each token begins.
+/// A value goes in brackets where it would otherwise read wrongly: a
+/// negative one, one with a `/` in its unit, and one raised to a power.
+fn put_in(
+    text: &str,
+    tokens: &[Token],
+    starts: &[usize],
+    upto: Option<usize>,
+    written: &[(String, String)],
+) -> Option<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let end = upto.unwrap_or(chars.len()).min(chars.len());
+    let mut out = String::new();
+    let mut from = 0;
+    for (token, &start) in tokens.iter().zip(starts) {
+        let Token::Name(name) = token else { continue };
+        let after = start + name.chars().count();
+        if after > end {
+            break;
+        }
+        let value = &written.iter().find(|(known, _)| known == name)?.1;
+        out.extend(&chars[from..start]);
+        let raised = chars[after..end]
+            .iter()
+            .find(|c| !c.is_whitespace())
+            .is_some_and(|c| matches!(c, '^' | '²' | '³'));
+        if raised || value.starts_with('−') || value.contains(['∠', '/']) {
+            out.push_str(&format!("({value})"));
+        } else {
+            out.push_str(value);
+        }
+        from = after;
+    }
+    out.extend(&chars[from..end]);
+    Some(out.trim().to_string())
 }
 
 impl Form<'_> {
@@ -2902,6 +3032,11 @@ impl Form<'_> {
     /// also a unit's letter. A value cannot use its own name, which lets
     /// `V = 12V` be twelve volts.
     fn lex(&self, finding: Option<&str>) -> Result<Vec<Vec<Token>>, Option<Why>> {
+        Ok(self.lex_marked(finding)?.into_iter().map(|(tokens, _)| tokens).collect())
+    }
+
+    /// As `lex`, with where in its text each token begins.
+    fn lex_marked(&self, finding: Option<&str>) -> Result<Vec<(Vec<Token>, Vec<usize>)>, Option<Why>> {
         self.texts
             .iter()
             .map(|(own, text)| {
@@ -2915,10 +3050,10 @@ impl Form<'_> {
                     .filter(|name| name != own)
                     .map(|name| (name.to_string(), Quantity::plain(1.0)))
                     .collect();
-                let tokens = lex(text, &names).ok_or(None)?;
+                let (tokens, starts) = lex_marked(text, &names).ok_or(None)?;
                 match unit_or_name(&tokens, finding) {
                     Some(word) => Err(Some(Why::UnitOrName(word))),
-                    None => Ok(tokens),
+                    None => Ok((tokens, starts)),
                 }
             })
             .collect()
@@ -2928,12 +3063,122 @@ impl Form<'_> {
     /// find; with none, the equation is only checked for having nothing
     /// left to find.
     fn work_out(&self, finding: Option<&str>) -> Result<Outcome, Option<Why>> {
-        let mut outcome = self.worked(finding)?;
-        outcome.used = self.kept_used(&self.lex(finding)?);
+        let mut trace = Trace::default();
+        let mut outcome = self.worked(finding, &mut trace)?;
+        let marked = self.lex_marked(finding)?;
+        let parts: Vec<Vec<Token>> = marked.iter().map(|(tokens, _)| tokens.clone()).collect();
+        outcome.used = self.kept_used(&parts);
+        // The steps are a second account of an answer already given. If
+        // they cannot be made, the answer has none.
+        outcome.steps = self.account(finding, &marked, &trace, &outcome).unwrap_or_default();
         Ok(outcome)
     }
 
-    fn worked(&self, finding: Option<&str>) -> Result<Outcome, Option<Why>> {
+    /// The steps of an answer: each value as it was read, in an order
+    /// that reads downward, then the formula with the values put in. For
+    /// an equation, the value found and then the equation with it put
+    /// back, and what each side comes to.
+    fn account(
+        &self,
+        finding: Option<&str>,
+        marked: &[(Vec<Token>, Vec<usize>)],
+        trace: &Trace,
+        outcome: &Outcome,
+    ) -> Option<Vec<Worked>> {
+        let sides = self.sides();
+        let step = |name: &str, text: String, value: &str, note: &str| Worked {
+            name: name.to_string(),
+            text,
+            value: value.to_string(),
+            note: note.to_string(),
+            other: None,
+        };
+        let mut steps: Vec<Worked> = Vec::new();
+        // Each name as it is written where it is put in.
+        let mut written: Vec<(String, String)> = Vec::new();
+
+        for name in &outcome.used {
+            let value = self.session.say(name)?;
+            let note = if constant(name).is_some() { "constant" } else { "kept" };
+            steps.push(step(name, String::new(), &value, note));
+            written.push((name.clone(), value));
+        }
+
+        let before = trace.found.as_ref().map_or(trace.values.len(), |found| found.before);
+        for (index, (name, quantity, hints)) in trace.values.iter().enumerate() {
+            if index == before
+                && let Some(finding) = finding
+            {
+                let value = in_full(&outcome.answer);
+                steps.push(step(finding, String::new(), &value, "found by trial"));
+                written.push((finding.to_string(), value));
+            }
+            let at = sides + self.values.iter().position(|(given, _)| given == name)?;
+            let (tokens, starts) = &marked[at];
+            let text = self.texts[at].1;
+            let value = spoken(*quantity, hints);
+            // A value worked out from others has them put in.
+            if tokens.iter().any(|token| matches!(token, Token::Name(_))) {
+                steps.push(step(name, put_in(text, tokens, starts, None, &written)?, &value, "values put in"));
+            } else {
+                steps.push(step(name, text.trim().to_string(), &value, "given"));
+            }
+            written.push((name.clone(), value));
+        }
+
+        if let Some(found) = &trace.found {
+            let finding = finding?;
+            if before == trace.values.len() {
+                let value = in_full(&outcome.answer);
+                steps.push(step(finding, String::new(), &value, "found by trial"));
+                written.push((finding.to_string(), value));
+            }
+            let side = |at: usize| put_in(self.texts[at].1, &marked[at].0, &marked[at].1, None, &written);
+            let text = format!("{} = {}", side(0)?, side(1)?);
+            steps.push(Worked {
+                other: Some(spoken(found.right, &trace.hints)),
+                ..step("", text, &spoken(found.left, &trace.hints), "put back")
+            });
+            return Some(steps);
+        }
+
+        // A formula. A helper on the end (`to E24`, `+/- 5%`, `to hex`)
+        // has its own line beneath the answer, so the steps stop at the
+        // value worked out, before it.
+        let (tokens, starts) = &marked[0];
+        let asked = |at: &usize| Series::named(&tokens[at + 1..]).is_some() || Base::named(&tokens[at + 1..]).is_some();
+        let helper = tokens
+            .iter()
+            .position(|token| *token == Token::PlusMinus)
+            .or_else(|| conversion_split(tokens).filter(asked));
+        let formula = helper.map_or(&tokens[..], |at| &tokens[..at]);
+        // A name alone has nothing put into it.
+        if let [Token::Name(_)] = formula {
+            return None;
+        }
+        let value = match helper {
+            Some(_) => {
+                let part = Part { names: &trace.names, hints: &trace.hints, value_only: false };
+                in_full(&reading_named(formula, conversion_split(formula), true, &part)?.answer)
+            }
+            None => in_full(&outcome.answer),
+        };
+        let upto = helper.map(|at| starts[at]);
+        let text = put_in(self.texts[0].1, tokens, starts, upto, &written)?;
+        steps.push(step(self.label.unwrap_or(""), text, &value, "values put in"));
+        // The nearest standard value is not the value worked out, so it
+        // has a step of its own.
+        if let Some(at) = helper
+            && Series::named(&tokens[at + 1..]).is_some()
+        {
+            let asked: String = self.texts[0].1.chars().skip(starts[at]).collect();
+            let standard = in_full(&outcome.answer);
+            steps.push(step("", format!("{value} {}", asked.trim()), &standard, "standard value"));
+        }
+        Some(steps)
+    }
+
+    fn worked(&self, finding: Option<&str>, trace: &mut Trace) -> Result<Outcome, Option<Why>> {
         let mut parts = self.lex(finding)?;
         let sides = self.sides();
 
@@ -3012,7 +3257,10 @@ impl Form<'_> {
             }
             carried.add(&outcome.hints);
             known.push((name.to_string(), outcome.raw));
+            trace.values.push((name.to_string(), outcome.raw, outcome.hints));
         }
+        trace.names = known.clone();
+        trace.hints = carried.clone();
 
         if !self.equation {
             // Values still waiting depend on one another in a ring.
@@ -3025,9 +3273,10 @@ impl Form<'_> {
                 .ok_or_else(|| why_refused(&parts[0], split, true, &part));
         }
 
-        // An equation. `apart` says how far its two sides are from equal
-        // with these names, and how large they are.
-        let apart = |mut names: Vec<(String, Quantity)>| -> Option<(f64, f64, Hints)> {
+        // An equation. `laid_out` works out its two sides with these
+        // names, and the values that waited on the one being found.
+        type Sides = (Vec<(String, Quantity)>, Quantity, Quantity, Hints);
+        let laid_out = |mut names: Vec<(String, Quantity)>| -> Option<Sides> {
             let mut hints = carried.clone();
             let mut to_do: Vec<&(&str, Vec<Token>)> = waiting.iter().collect();
             while let Some(at) = to_do.iter().position(|(_, tokens)| ready(tokens, &names)) {
@@ -3056,9 +3305,12 @@ impl Form<'_> {
                 && right.im == 0.0
                 && !left.percent
                 && !right.percent;
-            if !comparable {
-                return None;
-            }
+            comparable.then_some((names, left, right, hints))
+        };
+        // `apart` says how far the two sides are from equal, and how
+        // large they are.
+        let apart = |names: Vec<(String, Quantity)>| -> Option<(f64, f64, Hints)> {
+            let (_, left, right, hints) = laid_out(names)?;
             let (left, right) = (left.kelvin().unwrap_or(left.value), right.kelvin().unwrap_or(right.value));
             let gap = left - right;
             gap.is_finite().then(|| (gap, left.abs().max(right.abs()), hints))
@@ -3101,13 +3353,30 @@ impl Form<'_> {
             shown(value)
                 .map(|outcome| format!("{} {}", outcome.answer.number, outcome.answer.unit).trim_end().to_string())
         };
+        // For the steps: the value shown, put back into the equation.
+        let mut put_back = |value: f64| {
+            let mut names = known.clone();
+            names.push((finding.to_string(), Quantity::of(value, dim)));
+            if let Some((names, left, right, hints)) = laid_out(names) {
+                let before = trace.values.len();
+                for (name, quantity) in names.into_iter().skip(known.len() + 1) {
+                    trace.values.push((name, quantity, hints.clone()));
+                }
+                trace.hints = hints;
+                trace.found = Some(Found { before, left, right });
+            }
+        };
         match roots[..] {
             [] => Err(Some(Why::NoRoot(finding.to_string()))),
-            [only] => shown(only).ok_or(None),
+            [only] => {
+                put_back(only);
+                shown(only).ok_or(None)
+            }
             // The same size with opposite signs: the positive one, with
             // the other on the line beneath.
             [a, b] if (a + b).abs() <= 1e-9 * a.abs().max(b.abs()) => {
                 let (positive, negative) = if a > 0.0 { (a, b) } else { (b, a) };
+                put_back(positive);
                 let mut outcome = shown(positive).ok_or(None)?;
                 outcome.answer.parts = Some(format!("or {}", spoken(negative).ok_or(None)?));
                 Ok(outcome)
@@ -3156,11 +3425,12 @@ fn given_parts(formula: &str, values: &[(&str, &str)], session: &Session) -> Res
     if right.contains('=') {
         return Err(None);
     }
+    let label = left.filter(|left| is_label(left) && !is_given(left));
     let left = left.filter(|left| !is_label(left) || is_given(left));
     let texts: Vec<(&str, &str)> =
         left.map(|left| ("", left)).into_iter().chain([("", right)]).chain(values.iter().copied()).collect();
     let numbered: Vec<&str> = texts.iter().flat_map(|(_, text)| numbered_names(text)).collect();
-    let form = Form { texts, values, equation: left.is_some(), numbered, session };
+    let form = Form { texts, values, equation: left.is_some(), numbered, session, label };
     let parts = form.lex(None)?;
 
     // Words nothing knows. In an equation one of them is the value to
@@ -3432,6 +3702,7 @@ fn attempt_noting(
             bare_text: parser.bare_text.take(),
             crossed: false,
             used: Vec::new(),
+            steps: Vec::new(),
         });
     }
     if !in_program && !parser.interesting && wanted.is_none() && tolerance.is_none() {
@@ -3649,6 +3920,7 @@ fn attempt_noting(
         // is a range, and the engine has nowhere to hold one.
         crossed: crossing || ranged || (to_scale.is_some() && result.reading.is_none()),
         used: Vec::new(),
+        steps: Vec::new(),
     })
 }
 
@@ -3816,6 +4088,7 @@ pub fn evaluate_with_value_in(input: &str, kept: &[Kept]) -> Option<(Answer, f64
         let answer = Answer {
             given: given && outcome.used.is_empty(),
             uses: session.say_all(&outcome.used).filter(|_| !lone),
+            steps: (!outcome.steps.is_empty() && !lone).then_some(outcome.steps),
             ..outcome.answer
         };
         (in_bases(answer, outcome.quantity), outcome.quantity.magnitude_or_value())
@@ -3996,20 +4269,7 @@ impl Session {
             return Some(format!("{} {}", shown_as_is(constant.value, "").number, constant.unit));
         }
         let at = self.names.iter().position(|(known, _)| known == name)?;
-        let quantity = self.names[at].1;
-        let names = [(name.to_string(), quantity)];
-        let part = Part { names: &names, hints: &self.hints[at], value_only: false };
-        let shown = match reading_named(&[Token::Name(name.to_string())], None, false, &part) {
-            Some(outcome) => outcome.answer,
-            // A unit with no name of its own is given in SI base units and
-            // labelled as such, as it is for a step of a program.
-            None => shown_as_is(quantity.magnitude_or_value(), if quantity.dim == NO_DIM { "" } else { "(SI)" }),
-        };
-        let value = format!("{} {}", shown.number, shown.unit);
-        Some(match shown.angle {
-            Some(angle) => format!("{} ∠ {angle}", value.trim_end()),
-            None => value.trim_end().to_string(),
-        })
+        Some(spoken(self.names[at].1, &self.hints[at]))
     }
 
     /// The line beneath an answer: `Vcc = 9.000 V, R1 = 10.00 kΩ`.
@@ -5638,6 +5898,240 @@ mod tests {
             not_kept(&[], &format!("{name} = 5 V"), &taken(name));
         }
         assert_eq!(session(&["E13 = 5 V"]).len(), 1);
+    }
+
+    /// The steps of an answer, each as `working | note | value`.
+    #[track_caller]
+    fn steps_in(kept: &[Kept], input: &str) -> Vec<String> {
+        let answer = evaluate_in(input, kept).unwrap_or_else(|| panic!("no answer for {input:?}"));
+        answer
+            .steps
+            .unwrap_or_default()
+            .iter()
+            .map(|step| {
+                let working = match (step.name.as_str(), step.text.as_str()) {
+                    (name, "") => name.to_string(),
+                    ("", text) => text.to_string(),
+                    (name, text) => format!("{name} = {text}"),
+                };
+                let value = match &step.other {
+                    Some(other) => format!("{} = {other}", step.value),
+                    None => step.value.clone(),
+                };
+                format!("{working} | {} | {value}", step.note)
+            })
+            .collect()
+    }
+
+    #[track_caller]
+    fn steps_of(input: &str) -> Vec<String> {
+        steps_in(&[], input)
+    }
+
+    #[test]
+    fn the_steps_of_a_formula_with_its_values() {
+        assert_eq!(
+            steps_of("Vout = Vin * R2 / (R1 + R2), Vin = 5 V, R1 = 4.7kohm, R2 = 10kohm"),
+            [
+                "Vin = 5 V | given | 5.000 V",
+                "R1 = 4.7kohm | given | 4.700 kΩ",
+                "R2 = 10kohm | given | 10.00 kΩ",
+                "Vout = 5.000 V * 10.00 kΩ / (4.700 kΩ + 10.00 kΩ) | values put in | 3.401 V",
+            ]
+        );
+        // They read downward: a value comes after those it is worked out
+        // from, whatever order they were typed in, with them put in.
+        assert_eq!(
+            steps_of("Ic = beta * Ib, Ib = Vb / Rb, beta = 200, Vb = 4.3 V, Rb = 430kohm"),
+            [
+                "beta = 200 | given | 200.0",
+                "Vb = 4.3 V | given | 4.300 V",
+                "Rb = 430kohm | given | 430.0 kΩ",
+                "Ib = 4.300 V / 430.0 kΩ | values put in | 10.00 µA",
+                "Ic = 200.0 * 10.00 µA | values put in | 2.000 mA",
+            ]
+        );
+        // A value goes in brackets where it would read wrongly without:
+        // one below zero, one raised to a power, one with a `/` in its unit.
+        assert_eq!(
+            steps_of("Id = Idss * (1 - Vgs/Vp), Idss = 8mA, Vp = -3V, Vgs = -1V").last().unwrap(),
+            "Id = 8.000 mA * (1 - (−1.000 V)/(−3.000 V)) | values put in | 5.333 mA"
+        );
+        assert_eq!(
+            steps_of("E = 0.5 * C * V^2, C = 100uF, V = 12V").last().unwrap(),
+            "E = 0.5 * 100.0 µF * (12.00 V)^2 | values put in | 7.200 mJ"
+        );
+        assert_eq!(
+            steps_of("F = m * a, m = 5 kg, a = 9.81 m/s^2").last().unwrap(),
+            "F = 5.000 kg * (9.810 m/s²) | values put in | 49.05 N"
+        );
+        // With no name in front, and with a tag on the name.
+        assert_eq!(
+            steps_of("Rd * gm, Rd = 10kohm, gm = 2.1mS").last().unwrap(),
+            "10.00 kΩ * 2.100 mS | values put in | 21.00"
+        );
+        assert_eq!(
+            steps_of("VGS(off) = a * 2, a = 3 V").last().unwrap(),
+            "VGS(off) = 3.000 V * 2 | values put in | 6.000 V"
+        );
+        // A unit asked for is part of the working. A complex answer and a
+        // temperature are written as the answer line writes them.
+        assert_eq!(
+            steps_of("P = V_s^2 / R_L to mW, V_s = 3.3 V, R_L = 1kohm").last().unwrap(),
+            "P = (3.300 V)^2 / 1.000 kΩ to mW | values put in | 10.89 mW"
+        );
+        assert_eq!(
+            steps_of("Z = R + 1/(j*w*C), R = 10kohm, w = 2*pi*1kHz, C = 100nF").last().unwrap(),
+            "Z = 10.00 kΩ + 1/(j*6.283 kHz*100.0 nF) | values put in | 10.13 kΩ ∠ −9.043°"
+        );
+        assert_eq!(
+            steps_of("Tj = Ta + P * Rth, Ta = 25 C, P = 2 W, Rth = 50 C/W"),
+            [
+                "Ta = 25 C | given | 25.00 °C",
+                "P = 2 W | given | 2.000 W",
+                "Rth = 50 C/W | given | 50.00 °C/W",
+                "Tj = 25.00 °C + 2.000 W * (50.00 °C/W) | values put in | 125.0 °C",
+            ]
+        );
+        // A unit with no name is given in SI base units, and says so.
+        assert_eq!(steps_of("x_1 = 100 N/k, k = 50 N/m")[0], "k = 50 N/m | given | 50.00 (SI)");
+    }
+
+    #[test]
+    fn the_steps_of_an_equation() {
+        // Found by trial, so there is no algebra to show: the value, and
+        // then the equation with it put back and what each side comes to.
+        assert_eq!(
+            steps_of("10 Hz = 1/(2*pi*1Mohm*C)"),
+            ["C | found by trial | 15.92 nF", "10 Hz = 1/(2*pi*1Mohm*15.92 nF) | put back | 10.00 Hz = 10.00 Hz"]
+        );
+        assert_eq!(
+            steps_of("V = I * R, V = 12V, I = 1.5A"),
+            [
+                "V = 12V | given | 12.00 V",
+                "I = 1.5A | given | 1.500 A",
+                "R | found by trial | 8.000 Ω",
+                "12.00 V = 1.500 A * 8.000 Ω | put back | 12.00 V = 12.00 V",
+            ]
+        );
+        // A value that waited on the one found comes after it.
+        assert_eq!(
+            steps_of("P = I^2 * R, I = V / R, V = 12 V, P = 2 W"),
+            [
+                "V = 12 V | given | 12.00 V",
+                "P = 2 W | given | 2.000 W",
+                "R | found by trial | 72.00 Ω",
+                "I = 12.00 V / 72.00 Ω | values put in | 166.7 mA",
+                "2.000 W = (166.7 mA)^2 * 72.00 Ω | put back | 2.000 W = 2.000 W",
+            ]
+        );
+        // Of two values that differ only in sign, the one shown is put back.
+        assert_eq!(
+            steps_of("y^2 = 144 V^2"),
+            ["y | found by trial | 12.00 V", "(12.00 V)^2 = 144 V^2 | put back | 144.0 (SI) = 144.0 (SI)"]
+        );
+    }
+
+    #[test]
+    fn the_steps_with_kept_values_and_constants() {
+        let kept = session(&["R1 = 10kohm", "R2 = 22kohm", "Vcc = 9V"]);
+        assert_eq!(
+            steps_in(&kept, "Vth = Vcc * R2 / (R1 + R2)"),
+            [
+                "Vcc | kept | 9.000 V",
+                "R2 | kept | 22.00 kΩ",
+                "R1 | kept | 10.00 kΩ",
+                "Vth = 9.000 V * 22.00 kΩ / (10.00 kΩ + 22.00 kΩ) | values put in | 6.188 V",
+            ]
+        );
+        assert_eq!(
+            steps_in(&kept, "R1 || R2"),
+            ["R1 | kept | 10.00 kΩ", "R2 | kept | 22.00 kΩ", "10.00 kΩ || 22.00 kΩ | values put in | 6.875 kΩ"]
+        );
+        assert_eq!(
+            steps_in(&kept, "12V = I * R1"),
+            [
+                "R1 | kept | 10.00 kΩ",
+                "I | found by trial | 1.200 mA",
+                "12V = 1.200 mA * 10.00 kΩ | put back | 12.00 V = 12.00 V",
+            ]
+        );
+        assert_eq!(
+            steps_in(&kept, "y = R1 * a, a = 2"),
+            ["R1 | kept | 10.00 kΩ", "a = 2 | given | 2.000", "y = 10.00 kΩ * 2.000 | values put in | 20.00 kΩ"]
+        );
+        assert_eq!(
+            steps_of("k_B * 300 K / q_e"),
+            [
+                "k_B | constant | 1.381e-23 J/K",
+                "q_e | constant | 1.602e-19 C",
+                "(1.381e-23 J/K) * 300 K / 1.602e-19 C | values put in | 25.85 mV",
+            ]
+        );
+        // The line beneath the answer is there whether or not the steps
+        // are opened.
+        let answer = evaluate_in("R1 || R2", &kept).unwrap();
+        assert_eq!(answer.uses.as_deref(), Some("R1 = 10.00 kΩ, R2 = 22.00 kΩ"));
+    }
+
+    #[test]
+    fn the_steps_stop_before_a_helper() {
+        // A helper has its own line beneath the answer. The steps end at
+        // the value worked out, with one more for a standard value.
+        assert_eq!(
+            steps_of("R = (V - Vf) / I to E24, V = 5 V, Vf = 2.1 V, I = 20 mA")[3..],
+            ["R = (5.000 V - 2.100 V) / 20.00 mA | values put in | 145.0 Ω", "145.0 Ω to E24 | standard value | 150 Ω"]
+        );
+        assert_eq!(
+            steps_of("Vout = Vin * R2 / (R1 + R2) +/- 2%, Vin = 5 V, R1 = 4.7kohm, R2 = 10kohm").last().unwrap(),
+            "Vout = 5.000 V * 10.00 kΩ / (4.700 kΩ + 10.00 kΩ) | values put in | 3.401 V"
+        );
+        assert_eq!(
+            steps_of("n = a + b to hex, a = 16, b = 3").last().unwrap(),
+            "n = 16.00 + 3.000 | values put in | 19.00"
+        );
+        // The helper's line is still there.
+        let answer = evaluate("R = (V - Vf) / I to E24, V = 5 V, Vf = 2.1 V, I = 20 mA").unwrap();
+        assert!(answer.parts.is_some_and(|parts| parts.starts_with("+3.4 %")));
+    }
+
+    #[test]
+    fn what_has_no_steps() {
+        let none: [&str; 0] = [];
+        // A plain sum, with brackets or without, and a name in front of one.
+        assert_eq!(steps_of("2.2mA * 4.7kohm"), none);
+        assert_eq!(steps_of("9V * 4.7k / (10k + 4.7k)"), none);
+        assert_eq!(steps_of("VGS = -0.3V * (1 - sqrt(0.1mA / 0.2mA))"), none);
+        assert_eq!(steps_of("R9 = 10kohm"), none);
+        assert_eq!(steps_of("4.4kohm to E12"), none);
+        assert_eq!(steps_of("0xFF + 1"), none);
+        // A kept value or a constant alone, with a helper or without:
+        // nothing is put into it.
+        let kept = session(&["R1 = 10kohm"]);
+        assert_eq!(steps_in(&kept, "R1"), none);
+        assert_eq!(steps_in(&kept, "R1 to E6"), none);
+        assert_eq!(steps_in(&kept, "R1 +/- 5%"), none);
+        assert_eq!(steps_of("k_B"), none);
+        // An answer with no steps says nothing of them to the window.
+        assert_eq!(evaluate("2.2mA * 4.7kohm").unwrap().steps, None);
+    }
+
+    #[test]
+    fn where_each_token_begins() {
+        let names = [("R1".to_string(), Quantity::plain(1.0))];
+        let (tokens, starts) = lex_marked("Vcc * R1 / (4k7 + R1)", &names).unwrap();
+        assert_eq!(tokens.len(), starts.len());
+        let named: Vec<usize> =
+            tokens.iter().zip(&starts).filter(|(token, _)| matches!(token, Token::Name(_))).map(|(_, at)| *at).collect();
+        assert_eq!(named, [6, 18]);
+        // A value is put in where its name was, and nowhere else.
+        let written = [("R1".to_string(), "10.00 kΩ".to_string())];
+        assert_eq!(
+            put_in("Vcc * R1 / (4k7 + R1)", &tokens, &starts, None, &written).as_deref(),
+            Some("Vcc * 10.00 kΩ / (4k7 + 10.00 kΩ)")
+        );
+        // A name with no value to put in gives no text, and so no steps.
+        assert_eq!(put_in("Vcc * R1", &tokens[..3], &starts[..3], None, &[]), None);
     }
 
     #[test]

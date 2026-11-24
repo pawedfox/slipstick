@@ -79,8 +79,21 @@ type Kept = { name: string } & Record<string, unknown>;
 /** One answer, several of equal standing, or two values compared. */
 type Layout = "single" | "list" | "compare";
 
-/** One line of Claude's working, with the value the engine computed. */
-type Step = { name: string; text: string; number: string; unit: string; note: string };
+/** One line of working, with the value the engine computed. Claude's steps
+ *  have a number and a unit, and a note in Claude's words. The steps of an
+ *  instant answer are the engine's own: the value comes whole, the note is
+ *  one of a few fixed words, and the name or the text may be empty. */
+type Step = {
+  name: string;
+  text: string;
+  note: string;
+  number?: string;
+  unit?: string;
+  value?: string;
+  /** An equation with its value put back: what the right-hand side comes
+   *  to, `value` being the left. */
+  other?: string;
+};
 
 /** Something Claude supplied that the user did not give. */
 type Assumption = {
@@ -129,7 +142,8 @@ const PICTURE_LIMIT = 5 * 1024 * 1024;
 /** How many pictures one problem may carry. */
 const PICTURE_COUNT = 4;
 
-/** The answer on screen. Only answers from Claude have the optional parts. */
+/** The answer on screen. Only answers from Claude have the optional parts,
+ *  but for the steps, which an instant answer with named values has too. */
 type Shown = Value & {
   layout?: Layout;
   /** The answers of a list, or the two values of a comparison. */
@@ -343,12 +357,21 @@ function render() {
       ...(shown.steps ?? []).map((step) => {
         const working = document.createElement("span");
         working.className = "step-math";
-        working.append(...mathNodes(step.name), " = ", ...mathNodes(tidy(step.text)));
+        // A kept value has a name and no working; a formula with no name
+        // in front has working and no name.
+        working.append(
+          ...mathNodes(step.name),
+          step.name && step.text ? " = " : "",
+          ...mathNodes(tidy(step.text)),
+        );
         const note = document.createElement("span");
         note.className = "step-note";
         note.textContent = step.note;
+        const value = step.value ?? spaced({ number: step.number ?? "", unit: step.unit ?? "" });
+        // An equation with its value put back shows what each side comes to.
+        const result = step.other ? `${value} = ${step.other}` : `= ${value}`;
         const row = line("step");
-        row.append(line("step-working", working, note), line("step-value", `= ${spaced(step)}`));
+        row.append(line("step-working", working, note), line("step-value", result));
         return row;
       }),
     );
@@ -933,7 +956,9 @@ async function applyInstantAnswer() {
   // With a picture attached the words are for Claude, not for the instant path.
   const hasPictures = state.pictures.length > 0;
   const result =
-    text.trim() && !hasPictures ? await invoke<Value | null>("evaluate", { input: text, kept }) : null;
+    text.trim() && !hasPictures
+      ? await invoke<(Value & { steps?: Step[] }) | null>("evaluate", { input: text, kept })
+      : null;
   if (ticket !== evaluation) return;
 
   state.message = null;
@@ -953,6 +978,9 @@ async function applyInstantAnswer() {
     // but dimmed, so the window does not jump while typing and an old number
     // is never mistaken for a current one.
     if (state.shown) state.stale = true;
+    // The steps of an instant answer are of the input as it was, so they
+    // close when it changes.
+    if (!state.fromClaude) state.stepsOpen = false;
     // It may be on its way to Claude, so get Claude ready.
     if (text.trim().length >= 6 || hasPictures) warmClaude();
   }

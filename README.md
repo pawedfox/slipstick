@@ -14,11 +14,12 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.17.0, not yet released. The latest release is 0.11.0,
+Status: version 0.18.0, not yet released. The latest release is 0.11.0,
 which does not yet say why it refused an input, take a formula with its
 values after it, solve for a value left out, keep a value under a name,
-know the constants, electronvolts and moles, or have standard values,
-tolerances, hexadecimal and binary. It is one person's tool,
+know the constants, electronvolts and moles, have standard values,
+tolerances, hexadecimal and binary, or show steps for its own answers.
+It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
@@ -183,6 +184,24 @@ It understands:
   or a prefix, so with `k` kept, `2k` is two thousand and twice k is
   `2 * k`. Kept values are held in memory only.
 
+- **Steps, with no AI.** An answer worked out from named values has a
+  **Steps** control: a formula with its values after it, anything that
+  uses kept values or constants, and a solved equation. It shows each
+  value as it was read, then the formula with the values put in:
+
+  | For `Vout = Vin * R2 / (R1 + R2), Vin = 5 V, R1 = 4.7kohm, R2 = 10kohm` | | |
+  |---|---|---|
+  | `Vin = 5 V` | given | 5.000 V |
+  | `R1 = 4.7kohm` | given | 4.700 kΩ |
+  | `R2 = 10kohm` | given | 10.00 kΩ |
+  | `Vout = 5.000 V × 10.00 kΩ / (4.700 kΩ + 10.00 kΩ)` | values put in | 3.401 V |
+
+  So you can see how every unit and prefix was read. An equation is
+  solved by trial, not by rearranging, so its steps show the value found
+  and then the equation with it put back and what each side comes to
+  (`10.00 Hz = 10.00 Hz`). The values put in are rounded for showing; the
+  answer is worked out from the full values. A plain sum has no steps.
+
 It is strict on purpose. Anything it is not sure of gets no instant answer,
 never a guess. Press **Enter** on something it refused and, where it knows
 exactly why, it says so:
@@ -216,7 +235,9 @@ reason for refusing it, press Enter again to send it all the same.)
   the app's own engine works out every number, checking the units as it
   goes. If a step will not run, no number is shown.
 - Every answer from Claude has **one line with the formula it used**, so you
-  can check it at a glance, and **Steps** to see the working.
+  can check it at a glance, and **Steps** to see the working. That line is
+  how you tell an answer from Claude: an answer worked out on your PC never
+  has it, even when it has Steps.
 - Anything Claude assumed (a V_BE, a β, a temperature) is named under the
   answer. If the answer hangs on an assumed value, it says so.
 - **It does not correct your notation.** A valid formula written your own
@@ -351,6 +372,7 @@ decided and why, and what has and has not been tested.
 - The range of an answer worked out from several values that each have a
   tolerance, such as a divider made of two 5 % resistors.
 - Negative numbers and bitwise operations in hexadecimal and binary.
+- Steps for a plain sum, and a step for each bracket of a formula.
 - Not tested: Windows 10, and displays scaled above 125%.
 - Answers from Claude are checked against a set of 46 reference problems.
   The instructions given to Claude were tuned on that same set, so passing
