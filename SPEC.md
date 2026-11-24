@@ -18,8 +18,8 @@ revised with it (see "Roadmap"). The app itself is unchanged by that:
 0.11.0 still runs on Windows only and still asks Claude through Claude
 Code only.
 Item 1 of the new roadmap is hardening the engine, so that asking a model
-becomes a last resort. Its first five slices are built (2026-11-23), and
-none is released yet; 0.12.0 to 0.15.0 were never tagged.
+becomes a last resort. Its first six slices are built (2026-11-23), and
+none is released yet; 0.12.0 to 0.16.0 were never tagged.
 0.12.0: on Enter, the app says why it refused an input, where it knows for
 certain (see "Saying why" under "Instant path"). 0.13.0: a formula with
 its values after it is answered as you type (see "Values after a
@@ -28,8 +28,11 @@ formula"). 0.14.0: an equation with one value left out is solved for it
 front keeps it under that name until the app is quit, and later inputs may
 use the name (see "Named values that last the session"). 0.16.0: nine
 constants of physics by name, and the electronvolt and the mole as units
-(see "Constants and units for science").
-Next: the sixth slice, helpers for the trade.
+(see "Constants and units for science"). 0.17.0: the nearest standard
+value (`to E12`), a tolerance as a range (`± 5%`), and hexadecimal and
+binary (see "Helpers for the trade").
+Next: the seventh slice, steps for answers the engine gives by itself,
+which is not designed yet.
 
 ## Purpose
 
@@ -501,6 +504,10 @@ What it answers, as you type:
   Units combine: `6 bar * pi * (25mm)^2` is 1.178 kN.
 - **Conversions:** `3.5 bar to psi`, `12 L/min to gpm`, `2 in² to cm²`.
   `in` works as well as `to` where it cannot mean inches.
+- **Helpers for the trade** (0.17.0): the nearest standard value
+  (`4.4kohm to E12`), a tolerance as a range (`10kohm +/- 5%`), and
+  numbers in hexadecimal and binary (`0xFF + 1`, `255 to hex`). See
+  "Helpers for the trade" below.
 - **Temperature** (widened in 0.10.0, decided by the user 2026-11-22):
   - a direct conversion, `100 C to F`, as before;
   - a temperature with a rise added or taken away:
@@ -725,6 +732,161 @@ Rules:
 Not in the instant path: the decimal comma, and a plain ratio in
 decibels. Those go to Claude. Values that last from one input to the next
 were on this list until 0.15.0.
+
+### Helpers for the trade (0.17.0)
+
+The sixth slice of "Hardening the engine". Three things, each asked for at
+the end of typed input, and each putting a line beneath the answer (the
+line a complex answer's parts use). What the window shows for each was
+decided with the user on 2026-11-23.
+
+| Input | Answer | Beneath |
+|---|---|---|
+| `4.4kohm to E12` | 4.7 kΩ | +6.8 %  other side: 3.9 kΩ, −11.4 % |
+| `4.4kohm to E96` | 4.42 kΩ | +0.45 %  other side: 4.32 kΩ, −1.8 % |
+| `(5 V - 2 V) / 20 mA to E24` | 150 Ω | exact |
+| `1/(2*pi*10 kHz*10 kohm) to E12` | 1.5 nF | −5.8 %  other side: 1.8 nF, +13.1 % |
+| `10kohm +/- 5%` | 10.00 kΩ | 9.500 kΩ to 10.50 kΩ |
+| `3.3 V +/- 100 mV` | 3.300 V | 3.200 V to 3.400 V |
+| `5 V * 10k / (10k + 4.7k) +/- 2%` | 3.401 V | 3.333 V to 3.469 V |
+| `0xFF + 1` | 256 | 0x100  0b1 0000 0000 |
+| `0b1010` | 10 | 0xA  0b1010 |
+| `255 to hex` | 0xFF | 255  0b1111 1111 |
+| `255 to bin` | 0b1111 1111 | 255  0xFF |
+
+**The nearest standard value.** `to E6`, `E12`, `E24`, `E48`, `E96` or
+`E192` after a value (the `E` may be small). The series must be named:
+the engine does not pick one.
+
+- **The big line is the nearest value in the series,** written as a
+  catalogue writes it (`4.7 kΩ`, `470 Ω`, `4.42 kΩ`), and copying gives it.
+- **Beneath is how far off it is,** as a percentage of the value asked
+  for, and then the standard value on the other side with how far off that
+  is, so the next one up or down can be chosen by eye. A value that is in
+  the series has "exact" beneath it.
+- **Nearest is by that percentage,** which is by plain difference, not by
+  ratio.
+- **A value exactly midway is refused,** and Enter names both: "4.300 kΩ
+  is midway between 3.9 kΩ and 4.7 kΩ." Two answers are not chosen between
+  here any more than two roots of an equation are.
+- **Of any kind, not only a resistance:** `100 nF to E6`, `47 uH to E12`,
+  `5 V to E12`. A standard value is a round number in the unit the answer
+  is shown in, so `2.5 in to E12` is 2.7 in.
+- **It uses the place of a unit after `to`,** so the answer cannot also be
+  asked for in a unit. Only a real value above zero has one: "Only a value
+  above zero has a nearest standard value." A temperature, a level in
+  decibels and a complex number have none and are refused without a
+  reason.
+- **Kept under a name, it is the standard value that is kept:** after
+  Enter on `R1 = 4.4kohm to E12`, `R1` is 4.700 kΩ.
+- The values (`E24` and `E192` in `calc.rs`; the other four series are
+  every second or fourth one of those) are IEC 60063's, taken on the day
+  from the list on Wikipedia's "E series of preferred numbers" page and
+  not from memory, and checked there against that page's separate E96 and
+  E48 lists. A unit test holds them to what the page says of them: E192 is
+  the 192nd roots of ten to three figures but for 9.20, and E24 departs
+  from its rule at exactly eight values.
+
+**A tolerance.** `±`, or `+/-` from the keyboard, then a percentage or an
+amount of the answer's own kind.
+
+- **The big line is the value as worked out,** and copying gives it, as
+  without the tolerance. **The two ends of the range are beneath,** each
+  shown as the answer is, so they may differ in prefix:
+  `1kohm +/- 50%` has "500.0 Ω to 1.500 kΩ".
+- **It comes last and is a tolerance on all that is before it,** a
+  conversion included: `10 V to mV +/- 5%`. It is not read on a value
+  inside a sum (`5 V * 10kohm +/- 5% / 14.7kohm` is refused), because the
+  range of an answer worked out from values with tolerances is another
+  matter: see "Not done".
+- **A plus and a minus with nothing between them is what it was:**
+  `3 +- 1` is 2.000. Only `±` and `+/-`, which were never answered, are a
+  tolerance.
+- **A range is not a value.** Enter on `R1 = 10kohm +/- 5%` keeps nothing
+  and says "That answer cannot be kept under a name." A value given after
+  a formula cannot have one either.
+- Refused with a reason: an amount of another kind (`10kohm +/- 5`: "A
+  resistance and a plain number cannot be added."), and one below zero ("A
+  tolerance is a percentage, or an amount from zero up."). Refused without
+  one: a tolerance on a temperature, a level in decibels, a complex
+  number, an answer asked for in a unit of another kind (`1500 rpm to
+  Hz`), a standard value or a number in another base.
+
+**Hexadecimal and binary.** `0x` and `0b` (or `0X`, `0B`) start a number
+in base sixteen or two, and `to hex` and `to bin` ask for an answer in
+one.
+
+- **`0x10` used to be read as nought times ten, and answered 0.** So
+  `0x10 + 1` was 1.000 and `0x10 * 2 V` was 0 V, with no warning: wrong
+  numbers, to anyone who meant sixteen. This is the one place where
+  something that was answered now has another answer, and the user agreed
+  to it on 2026-11-23. Only a nought, an `x` and a digit of the base, at
+  the start of a number, is read this way. `2x3`, `2 x 3`, `3x10 V` and
+  `0 x 10` are multiplications still.
+- **Decimal on the big line unless another base is asked for.** Where the
+  input has a number in another base in it and the answer is a whole
+  number from nought up, it is shown in full (`65536`, not `65.54 k`) with
+  the other two bases beneath. Any other answer is shown as it always
+  was: `0x10 * 2 V` is 32.00 V, `0xFF / 2` is 127.5.
+- **A number in another base typed alone is answered,** though a decimal
+  number alone still is not: `0xFF` is 255.
+- **`to hex` and `to bin` put that base on the big line,** and the other
+  two beneath. Copying gives the big line, a binary number without the
+  spaces it is shown with.
+- **Binary is shown in fours from the right.**
+- **Whole numbers from 0 to 2^53 only,** which is as far as the engine
+  holds every whole number exactly. A sum that should be whole and misses
+  by rounding (`0.1 * 30`) counts as whole. Anything else asked for in a
+  base is refused: "Only a whole number from 0 to 2^53, with no unit, can
+  be written in hexadecimal."
+- **A kept value does not remember its base:** after `mask = 0xFF`,
+  `mask + 1` is 256.0. `mask to hex` and `mask + 0x01` give the bases.
+
+For all three:
+
+- **They work on what the engine already answers:** a sum, a formula with
+  its values after it, and input that uses kept values or constants, where
+  the line of values used comes beneath the helper's own line.
+- **`E6` to `E192`, `hex` and `bin` cannot be kept as names,** since they
+  mean something after `to`: "E12 already means something here, so it
+  cannot name a value." They could be before this version.
+- **Typed input only.** A step of a program is refused if it has a
+  tolerance, a series or a base after `to` in it, and Claude's
+  instructions are unchanged. The lexer is shared, so `0x10` in a program
+  is now sixteen and not nought; Claude is not told of it and has no
+  reason to write either.
+
+Not done:
+
+- **The range of an answer worked out from values that each have a
+  tolerance** (a divider from two 5 % resistors). Trying every corner is
+  right only where the answer rises or falls steadily with each value, and
+  the engine cannot be sure of that, so it would need thought before it
+  could be shown without a warning. Asymmetric tolerances (`+10 % −5 %`)
+  are not read either.
+- **A standard value for the unknown of an equation**
+  (`10 Hz = 1/(2*pi*1Mohm*C) to E12`), and a tolerance before a
+  conversion (`10kohm +/- 5% to ohm`).
+- **The next standard value up or down** as the answer. The line beneath
+  gives it to read off.
+- **Negative numbers in another base, bitwise operations** (and, or,
+  shifts), a fixed width, and octal.
+- **A reason for a number in another base that is too large or badly
+  formed** (`0x1G`): nothing is shown.
+
+Checked for 0.17.0 (2026-11-23): 100 unit tests, of which nine groups are
+new (the nearest standard value, what is not chosen between, the published
+series, a tolerance, what a tolerance may not be, hexadecimal and binary,
+that a times sign is still one, the helpers with kept values, and that
+programs have none of them), and the 91 from before pass unchanged; every
+reference problem through the instant path alone, which answers the same
+six as 0.16.0; and the window in the built-in browser, where each helper's
+line is beneath its answer, a second line of kept values comes under it,
+Enter keeps a standard value and refuses a range with its reason, three
+of the reasons above are shown on Enter (midway, not a whole number, a
+tolerance below zero), and a 53-bit number in binary wraps
+inside the window. Not checked: the real app. The instructions to Claude
+are unchanged, so the reference set was not run through a model.
 
 ### Constants and units for science (0.16.0)
 
@@ -2066,7 +2228,10 @@ types.
    constants are typed with a subscript (`k_B`, `c_0`, `g_0`), since `g`
    is the gram, and five more were added.*
 6. **Helpers for the trade:** the nearest standard resistor value,
-   tolerance ranges, hexadecimal and binary.
+   tolerance ranges, hexadecimal and binary. *Built 2026-11-23, in 0.17.0:
+   see "Helpers for the trade" under "Instant path". The range is of one
+   answer with a tolerance on the end; the range of an answer worked out
+   from several values with tolerances is not done.*
 7. **Steps for answers the engine gives by itself** (asked about by the
    user 2026-11-23; found possible, not designed). See below.
 

@@ -504,8 +504,62 @@ enum Token {
     Root,
     /// Between a magnitude and its angle: `10 ∠ 30°`, or `10 @ 30 deg`.
     Angle,
+    /// Before a tolerance: `10kohm ± 5%`, or `+/-` from the keyboard.
+    PlusMinus,
     Open,
     Close,
+}
+
+/// The largest whole number written in another base: 2^53, up to which
+/// every whole number is held exactly.
+const BASE_LIMIT: u64 = 1 << 53;
+
+/// A number written in hexadecimal (`0xFF`) or binary (`0b1010`) starting
+/// at `start`: its value and the index after it.
+///
+/// Returns nothing where no such number starts, so that the input is read
+/// as it always was: `2x3` is six, and so is `2 x 3`. The outer `Some` with
+/// nothing in it is a number in another base that cannot be read (`0x1G`,
+/// or one too large), which is refused.
+///
+/// `0x10` used to be read as nought times ten. Nobody types that to be
+/// told nought, so a `0x` or `0b` that starts a number and has a digit
+/// after it is the base.
+fn based_number(chars: &[char], start: usize) -> Option<Option<(f64, usize)>> {
+    let joined = |c: &char| c.is_alphanumeric() || matches!(c, '.' | '_');
+    if chars.get(start) != Some(&'0') || start.checked_sub(1).is_some_and(|before| joined(&chars[before])) {
+        return None;
+    }
+    let radix = match chars.get(start + 1)? {
+        'x' | 'X' => 16,
+        'b' | 'B' => 2,
+        _ => return None,
+    };
+    if !chars.get(start + 2)?.is_digit(radix) {
+        return None;
+    }
+    let mut end = start + 2;
+    let mut value: u64 = 0;
+    while let Some(c) = chars.get(end).filter(|c| c.is_alphanumeric()) {
+        let Some(digit) = c.to_digit(radix) else { return Some(None) };
+        value = value * u64::from(radix) + u64::from(digit);
+        if value > BASE_LIMIT {
+            return Some(None);
+        }
+        end += 1;
+    }
+    // A point, or an underscore, straight after it is not part of any
+    // number in another base.
+    if chars.get(end).is_some_and(joined) {
+        return Some(None);
+    }
+    Some(Some((value as f64, end)))
+}
+
+/// Whether the input has a number in hexadecimal or binary in it.
+fn mentions_base(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    (0..chars.len()).any(|at| matches!(based_number(&chars, at), Some(Some(_))))
 }
 
 fn lex(text: &str, names: &[(String, Quantity)]) -> Option<Vec<Token>> {
@@ -515,6 +569,17 @@ fn lex(text: &str, names: &[(String, Quantity)]) -> Option<Vec<Token>> {
 
     while i < chars.len() {
         let c = chars[i];
+        if c == '±' || chars[i..].starts_with(&['+', '/', '-']) {
+            tokens.push(Token::PlusMinus);
+            i += if c == '±' { 1 } else { 3 };
+            continue;
+        }
+        if let Some(based) = based_number(&chars, i) {
+            let (value, end) = based?;
+            tokens.push(Token::Number(value));
+            i = end;
+            continue;
+        }
         let single = match c {
             '+' => Some(Token::Plus),
             '-' | '−' | '–' => Some(Token::Minus),
@@ -1888,13 +1953,42 @@ fn shown_with_prefix(value: f64, unit: &str) -> Answer {
 }
 
 /// Picks the largest unit in which the value is at least 1.
-fn shown_in_best(value: f64, choices: &[(f64, &str)]) -> Answer {
-    let (scale, unit) = choices
+fn best_of<'a>(value: f64, choices: &'a [(f64, &'a str)]) -> (f64, &'a str) {
+    *choices
         .iter()
         .rev()
         .find(|(scale, _)| value.abs() / scale >= 1.0)
-        .unwrap_or(&choices[0]);
+        .unwrap_or(&choices[0])
+}
+
+fn shown_in_best(value: f64, choices: &[(f64, &str)]) -> Answer {
+    let (scale, unit) = best_of(value, choices);
     shown_as_is(value / scale, unit)
+}
+
+/// The kinds of quantity shown in the best of a few units, smallest first.
+const BEST: &[(Dim, &[(f64, &str)])] = &[
+    (TIME, &[(1e-9, "ns"), (1e-6, "µs"), (1e-3, "ms"), (1.0, "s")]),
+    (MASS, &[(1e-6, "mg"), (1e-3, "g"), (1.0, "kg")]),
+    (AREA, &[(1e-6, "mm²"), (1e-4, "cm²"), (1.0, "m²")]),
+    (VOLUME, &[(1e-9, "mm³"), (1e-6, "mL"), (1e-3, "L"), (1.0, "m³")]),
+    (SPEED, &[(1e-3, "mm/s"), (1.0, "m/s")]),
+    (ACCELERATION, &[(1.0, "m/s²")]),
+    (FLOW, &[(1e-3 / 60.0, "L/min")]),
+    (ANGLE_DIM, &[(1.0, "rad")]),
+    (ANGULAR_SPEED, &[(1.0, "rad/s")]),
+];
+
+/// The size, in SI units, of the unit `shown_by_default` shows a value in,
+/// but for a power of ten: 1 for anything shown with a prefix, and the
+/// unit's own size for one of `BEST`. A standard value is a round number
+/// in the unit it is shown in, and litres a minute are not a power of ten
+/// of anything in SI.
+fn default_scale(value: f64, dim: Dim) -> f64 {
+    let listed = |dim: Dim| BEST.iter().find(|(d, _)| *d == dim).map(|(_, choices)| best_of(value, choices).0);
+    let mut without_angle = dim;
+    without_angle[ANGLE] = 0;
+    listed(dim).or_else(|| listed(without_angle)).unwrap_or(1.0)
 }
 
 /// The unit a result is shown in when the user did not ask for one.
@@ -1916,17 +2010,6 @@ fn shown_by_default(value: f64, dim: Dim, joules: bool) -> Option<Answer> {
         (FORCE, "N"),
         (PRESSURE, "Pa"),
         (AMOUNT, "mol"),
-    ];
-    const BEST: &[(Dim, &[(f64, &str)])] = &[
-        (TIME, &[(1e-9, "ns"), (1e-6, "µs"), (1e-3, "ms"), (1.0, "s")]),
-        (MASS, &[(1e-6, "mg"), (1e-3, "g"), (1.0, "kg")]),
-        (AREA, &[(1e-6, "mm²"), (1e-4, "cm²"), (1.0, "m²")]),
-        (VOLUME, &[(1e-9, "mm³"), (1e-6, "mL"), (1e-3, "L"), (1.0, "m³")]),
-        (SPEED, &[(1e-3, "mm/s"), (1.0, "m/s")]),
-        (ACCELERATION, &[(1.0, "m/s²")]),
-        (FLOW, &[(1e-3 / 60.0, "L/min")]),
-        (ANGLE_DIM, &[(1.0, "rad")]),
-        (ANGULAR_SPEED, &[(1.0, "rad/s")]),
     ];
 
     let named = |dim: Dim| -> Option<Answer> {
@@ -1953,6 +2036,206 @@ fn shown_by_default(value: f64, dim: Dim, joules: bool) -> Option<Answer> {
         }
         named(without_angle)
     })
+}
+
+// ---- helpers for the trade ----------------------------------------------------
+//
+// Three things asked for at the end of typed input, each of which puts a
+// line beneath the answer: the nearest standard value (`4.4kohm to E12`),
+// a tolerance (`10kohm ± 5%`) and another number base (`255 to hex`).
+
+/// The gap between two things on the line beneath an answer. It is wider
+/// than a space, and the window does not close it up.
+const GAP: &str = "\u{2003}";
+
+/// The E24 values of IEC 60063. E12 is every second one and E6 every
+/// fourth. They are a table and not a rule: eight of them are not what
+/// rounding the twenty-fourth roots of ten gives.
+static E24: [f64; 24] = [
+    1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0,
+    3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1,
+];
+
+/// The E192 values of IEC 60063. E96 is every second one and E48 every
+/// fourth. All but 9.20 are the 192nd roots of ten to three figures.
+static E192: [f64; 192] = [
+    1.00, 1.01, 1.02, 1.04, 1.05, 1.06, 1.07, 1.09, 1.10, 1.11, 1.13, 1.14,
+    1.15, 1.17, 1.18, 1.20, 1.21, 1.23, 1.24, 1.26, 1.27, 1.29, 1.30, 1.32,
+    1.33, 1.35, 1.37, 1.38, 1.40, 1.42, 1.43, 1.45, 1.47, 1.49, 1.50, 1.52,
+    1.54, 1.56, 1.58, 1.60, 1.62, 1.64, 1.65, 1.67, 1.69, 1.72, 1.74, 1.76,
+    1.78, 1.80, 1.82, 1.84, 1.87, 1.89, 1.91, 1.93, 1.96, 1.98, 2.00, 2.03,
+    2.05, 2.08, 2.10, 2.13, 2.15, 2.18, 2.21, 2.23, 2.26, 2.29, 2.32, 2.34,
+    2.37, 2.40, 2.43, 2.46, 2.49, 2.52, 2.55, 2.58, 2.61, 2.64, 2.67, 2.71,
+    2.74, 2.77, 2.80, 2.84, 2.87, 2.91, 2.94, 2.98, 3.01, 3.05, 3.09, 3.12,
+    3.16, 3.20, 3.24, 3.28, 3.32, 3.36, 3.40, 3.44, 3.48, 3.52, 3.57, 3.61,
+    3.65, 3.70, 3.74, 3.79, 3.83, 3.88, 3.92, 3.97, 4.02, 4.07, 4.12, 4.17,
+    4.22, 4.27, 4.32, 4.37, 4.42, 4.48, 4.53, 4.59, 4.64, 4.70, 4.75, 4.81,
+    4.87, 4.93, 4.99, 5.05, 5.11, 5.17, 5.23, 5.30, 5.36, 5.42, 5.49, 5.56,
+    5.62, 5.69, 5.76, 5.83, 5.90, 5.97, 6.04, 6.12, 6.19, 6.26, 6.34, 6.42,
+    6.49, 6.57, 6.65, 6.73, 6.81, 6.90, 6.98, 7.06, 7.15, 7.23, 7.32, 7.41,
+    7.50, 7.59, 7.68, 7.77, 7.87, 7.96, 8.06, 8.16, 8.25, 8.35, 8.45, 8.56,
+    8.66, 8.76, 8.87, 8.98, 9.09, 9.20, 9.31, 9.42, 9.53, 9.65, 9.76, 9.88,
+];
+
+/// A series of standard values: the ones a resistor, capacitor or
+/// inductor can be bought in.
+struct Series {
+    table: &'static [f64],
+    /// Every how many of the table's values are in the series.
+    step: usize,
+    /// The figures its values are written with: `4.7`, `4.75`.
+    figures: i32,
+}
+
+impl Series {
+    /// The series named after `to`: `E6`, `E12`, `E24`, `E48`, `E96` or
+    /// `E192`. The lexer reads the name as a letter and a number.
+    fn named(wanted: &[Token]) -> Option<Self> {
+        let [Token::Word(letter), Token::Number(count)] = wanted else { return None };
+        if letter != "E" && letter != "e" {
+            return None;
+        }
+        let (table, step, figures): (&'static [f64], usize, i32) = match *count {
+            6.0 => (&E24, 4, 2),
+            12.0 => (&E24, 2, 2),
+            24.0 => (&E24, 1, 2),
+            48.0 => (&E192, 4, 3),
+            96.0 => (&E192, 2, 3),
+            192.0 => (&E192, 1, 3),
+            _ => return None,
+        };
+        Some(Self { table, step, figures })
+    }
+
+    /// The standard values either side of `value`, which is above nought:
+    /// the nearest below it and the nearest above. Both are the value
+    /// itself where it is a standard one.
+    fn around(&self, value: f64) -> Option<(f64, f64)> {
+        let decade = value.log10().floor() as i32;
+        let (mut below, mut above) = (0.0, f64::INFINITY);
+        // The decade either side as well, since the value may be at the
+        // very edge of its own.
+        for decade in decade - 1..=decade + 1 {
+            for &mantissa in self.table.iter().step_by(self.step) {
+                // Dividing keeps a small standard value exact: 4.7 / 1000.
+                let standard =
+                    if decade >= 0 { mantissa * 10f64.powi(decade) } else { mantissa / 10f64.powi(-decade) };
+                if (standard - value).abs() <= value * 1e-9 {
+                    return Some((standard, standard));
+                }
+                if standard < value {
+                    below = f64::max(below, standard);
+                } else {
+                    above = f64::min(above, standard);
+                }
+            }
+        }
+        (below > 0.0 && above.is_finite()).then_some((below, above))
+    }
+
+    /// A standard value as a catalogue writes it, from the answer the
+    /// engine would show for it: `4.7 kΩ` and not `4.700 kΩ`, `470 Ω`,
+    /// `47.5 nF`.
+    fn written(&self, shown: Answer) -> Answer {
+        let Ok(value) = shown.number.parse::<f64>() else { return shown };
+        if shown.number.contains('e') || value <= 0.0 {
+            return shown;
+        }
+        let whole_digits = (value.log10() + 1e-12).floor() as i32 + 1;
+        let decimals = (self.figures - whole_digits).max(0) as usize;
+        Answer { number: format!("{value:.decimals$}"), ..shown }
+    }
+}
+
+/// Whether the word is the name of a series: `E12`.
+fn is_series(word: &str) -> bool {
+    lex(word, &[]).is_some_and(|tokens| Series::named(&tokens).is_some())
+}
+
+/// How far a standard value is from the one asked for, as the line beneath
+/// gives it: `+6.8 %`, `−11.4 %`, `+0.34 %`.
+fn percent_off(error: f64) -> String {
+    let percent = error.abs() * 100.0;
+    // One decimal place, or two figures where that would say too little.
+    let decimals = if percent >= 1.0 { 1 } else { (1 - percent.log10().floor() as i32).clamp(2, 12) as usize };
+    format!("{}{percent:.decimals$} %", if error < 0.0 { "−" } else { "+" })
+}
+
+/// A number and its unit as they are written on the line beneath.
+fn spaced(shown: &Answer) -> String {
+    format!("{} {}", shown.number, shown.unit).trim_end().to_string()
+}
+
+/// The base asked for after `to`: `hex` or `bin`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Base {
+    Hex,
+    Binary,
+}
+
+impl Base {
+    fn named(wanted: &[Token]) -> Option<Self> {
+        match wanted {
+            [Token::Word(word)] if word == "hex" => Some(Base::Hex),
+            [Token::Word(word)] if word == "bin" => Some(Base::Binary),
+            _ => None,
+        }
+    }
+
+    /// A whole number in this base: `0xFF`, and `0b1111 1111` with its
+    /// digits in fours from the right.
+    fn write(self, number: u64) -> String {
+        match self {
+            Base::Hex => format!("0x{number:X}"),
+            Base::Binary => {
+                let digits = format!("{number:b}");
+                let first = digits.len() % 4;
+                let mut written = String::from("0b");
+                for (at, digit) in digits.chars().enumerate() {
+                    if at > 0 && at % 4 == first % 4 {
+                        written.push(' ');
+                    }
+                    written.push(digit);
+                }
+                written
+            }
+        }
+    }
+}
+
+/// The value as a whole number that can be written in another base: a
+/// plain number from nought to 2^53. A sum that should come to a whole
+/// number and misses by rounding (`0.1 * 30`) counts as one.
+fn whole_number(quantity: Quantity) -> Option<u64> {
+    let plain = quantity.dim == NO_DIM && quantity.im == 0.0 && quantity.reading.is_none() && !quantity.percent;
+    let nearest = quantity.value.round();
+    let fits = (0.0..=BASE_LIMIT as f64).contains(&nearest) && (quantity.value - nearest).abs() <= 1e-9;
+    (plain && fits).then_some(nearest as u64)
+}
+
+/// A whole number on the big line in one base, with the other two on the
+/// line beneath. Copying gives the big line, without the spaces a binary
+/// number is shown with.
+fn in_base(number: u64, base: Option<Base>) -> Answer {
+    let (hex, binary) = (Base::Hex.write(number), Base::Binary.write(number));
+    let (big, others) = match base {
+        None => (number.to_string(), format!("{hex}{GAP}{binary}")),
+        Some(Base::Hex) => (hex, format!("{number}{GAP}{binary}")),
+        Some(Base::Binary) => (binary, format!("{number}{GAP}{hex}")),
+    };
+    Answer { parts: Some(others), ..Answer::real(big.clone(), String::new(), big.replace(' ', "")) }
+}
+
+/// The answer to input that has a number in hexadecimal or binary in it.
+/// Where it comes to a whole number, that is shown in full, in decimal,
+/// with the other two bases beneath; anything else is left as it is.
+fn with_bases(answer: Answer, quantity: Quantity) -> Answer {
+    match whole_number(quantity) {
+        Some(number) if answer.parts.is_none() && answer.angle.is_none() => {
+            Answer { given: answer.given, uses: answer.uses, ..in_base(number, None) }
+        }
+        _ => answer,
+    }
 }
 
 // ---- entry point ------------------------------------------------------------
@@ -2122,6 +2405,17 @@ enum Why {
     /// kept under it: a level in decibels, a percentage, the value found
     /// by solving an equation.
     CannotKeep,
+    /// Asked for in hexadecimal or binary, and not a whole number that
+    /// can be written in one: `2.5 to hex`, `5 V to bin`.
+    NotForBase(Base),
+    /// Exactly halfway between two standard values: `4.3kohm to E12`.
+    /// With the value and the two it lies between, as they are shown.
+    Midway(String, String, String),
+    /// A standard value was asked for something that has none: nought, or
+    /// a negative value.
+    NoStandard,
+    /// A tolerance that is not a percentage or an amount: `10 V ± -1 V`.
+    NoTolerance,
 }
 
 /// The kinds of quantity the engine has a name for, each with its article.
@@ -2239,6 +2533,13 @@ impl Why {
                 format!("{name} is a unit, so it cannot be kept. Use a name such as {name}1.")
             }
             Why::CannotKeep => "That answer cannot be kept under a name.".into(),
+            Why::NotForBase(base) => format!(
+                "Only a whole number from 0 to 2^53, with no unit, can be written in {}.",
+                if *base == Base::Hex { "hexadecimal" } else { "binary" }
+            ),
+            Why::Midway(value, below, above) => format!("{value} is midway between {below} and {above}."),
+            Why::NoStandard => "Only a value above zero has a nearest standard value.".into(),
+            Why::NoTolerance => "A tolerance is a percentage, or an amount from zero up.".into(),
             Why::UnitOrName(name) => format!(
                 "{name} could be a unit or the value you named {name}. Give the value another name, such as {name}_1."
             ),
@@ -2284,7 +2585,7 @@ fn why_not_applied(name: &str, argument: Quantity) -> Option<Why> {
 fn all_maths(tokens: &[Token]) -> bool {
     tokens.iter().all(|token| match token {
         Token::Word(word) => {
-            matches!(word.as_str(), "pi" | "π" | "e" | "j" | "to" | "in")
+            matches!(word.as_str(), "pi" | "π" | "e" | "E" | "j" | "to" | "in" | "hex" | "bin")
                 || is_function(word)
                 || is_complex_function(word)
                 || lookup(word).is_some()
@@ -2533,7 +2834,11 @@ fn numbered_names(text: &str) -> Vec<&str> {
         let after_number = before.is_some_and(|c| c.is_ascii_digit() || c == '.');
         let Some(digit) = word.find(|c: char| c.is_ascii_digit()) else { continue };
         let unit_with_power = is_dimensioned_unit(&word[..digit]) && matches!(&word[digit..], "2" | "3");
-        if !after_number && !unit_with_power && !word.contains('_') {
+        // `to E24` asks for a standard value. It is not a name.
+        let earlier = text[..chars[start].0].trim_end();
+        let asked_for = is_series(word)
+            && earlier.strip_suffix("to").is_some_and(|rest| !rest.ends_with(|c: char| c.is_alphanumeric() || c == '_'));
+        if !after_number && !unit_with_power && !asked_for && !word.contains('_') {
             found.push(word);
         }
     }
@@ -3070,6 +3375,15 @@ fn attempt_noting(
     // Typed input must be worth answering: more than a bare number. A step
     // of a program may be as simple as `200` or another step's name.
     let in_program = bare_m == BareM::Program;
+    // A tolerance comes last, after all that it is a tolerance on. It is
+    // for typed input that is shown, not for a value given a name.
+    let (tokens, tolerance) = match tokens.iter().position(|token| *token == Token::PlusMinus) {
+        Some(at) => (&tokens[..at], Some(&tokens[at + 1..])),
+        None => (tokens, None),
+    };
+    if tolerance.is_some() && (in_program || part.value_only || split.is_some_and(|at| at >= tokens.len())) {
+        return None;
+    }
     let (expression, wanted) = match split {
         Some(at) => (&tokens[..at], Some(&tokens[at + 1..])),
         None => (tokens, None),
@@ -3120,7 +3434,19 @@ fn attempt_noting(
             used: Vec::new(),
         });
     }
-    if !in_program && !parser.interesting && wanted.is_none() {
+    if !in_program && !parser.interesting && wanted.is_none() && tolerance.is_none() {
+        return None;
+    }
+
+    // What typed input may ask for after `to` in place of a unit: another
+    // number base, or the nearest of a series of standard values.
+    let asked = wanted.filter(|_| !in_program);
+    let base = asked.and_then(Base::named);
+    let series = asked.and_then(Series::named);
+    // A tolerance and a standard value are for an ordinary amount.
+    if (tolerance.is_some() || series.is_some())
+        && (result.im != 0.0 || result.reading.is_some() || result.dim == TEMPERATURE || result.percent)
+    {
         return None;
     }
 
@@ -3131,7 +3457,7 @@ fn attempt_noting(
         _ => None,
     };
     let target = match wanted {
-        Some(unit) if to_scale.is_none() => Some(parse_target(unit)?),
+        Some(unit) if to_scale.is_none() && base.is_none() && series.is_none() => Some(parse_target(unit)?),
         _ => None,
     };
     let scale_typed = parser.celsius || parser.fahrenheit;
@@ -3153,29 +3479,12 @@ fn attempt_noting(
         }
     }
 
-    let answer = if result.im != 0.0 {
-        shown_complex(result, target.as_ref(), parser.joules)?
-    } else if result.dim == TEMPERATURE && target.is_none() {
-        if result.kelvin().is_some_and(|kelvin| kelvin < -1e-9) {
-            *why = Some(Why::BelowZero);
-        }
-        shown_temperature(result, to_scale, parser.typed_scale(), scale_typed)?
-    } else if result.reading.is_some() {
-        return None;
-    } else if let Some(target) = &target {
-        let value = if result.dim == target.dim {
-            result.value
-        } else if in_program {
-            // Claude is told not to convert between rpm and Hz with `to`.
-            return None;
-        } else {
-            across_angle(result, target, typed_in_hertz(&parser, result.dim))?
-        };
-        shown_as_is(value / target.factor, &target.label)
-    } else if result.dim == THERMAL_RESISTANCE {
+    // The unit a real result is shown in where that is not left to
+    // `shown_by_default`, as its size in SI units and its name.
+    let fixed: Option<(f64, String)> = if result.dim == THERMAL_RESISTANCE {
         // In the scale typed, as a datasheet gives it: °C/W.
         let scale = parser.typed_scale().unwrap_or(Scale::Kelvin);
-        shown_as_is(result.value / scale.degree(), &format!("{}/W", scale.symbol()))
+        Some((scale.degree(), format!("{}/W", scale.symbol())))
     } else {
         // If the result is in the same kind of unit the user typed, and that
         // unit does not take prefixes, answer in it: `3 bar * 2` is 6 bar.
@@ -3190,23 +3499,137 @@ fn attempt_noting(
                 if !UNITS[index].prefixable && same_kind.iter().all(|&t| t == (index, power)) =>
             {
                 let unit = &UNITS[index];
-                let label = format!("{}{}", unit.names[0], superscript(power));
-                shown_as_is(result.value / unit.factor.powi(power), &label)
+                Some((unit.factor.powi(power), format!("{}{}", unit.names[0], superscript(power))))
             }
             // Typed input only: what a program shows is as it was.
             _ if !in_program && result.dim == FREQUENCY && !parser.counts_cycles() => {
-                shown_as_is(result.value, "s⁻¹")
+                Some((1.0, "s⁻¹".to_string()))
             }
+            _ => None,
+        }
+    };
+    let joules = parser.joules;
+    let in_hertz = typed_in_hertz(&parser, result.dim);
+    // A real value of the result's kind as it is shown: in the unit asked
+    // for, in the unit typed, or in the one the engine picks. The answer
+    // is shown this way, and so are the ends of a tolerance and the
+    // standard values either side.
+    let show = |value: f64| -> Option<Answer> {
+        if let Some(target) = &target {
+            let value = if result.dim == target.dim {
+                value
+            } else if in_program {
+                // Claude is told not to convert between rpm and Hz with `to`.
+                return None;
+            } else {
+                across_angle(Quantity { value, ..result }, target, in_hertz)?
+            };
+            return Some(shown_as_is(value / target.factor, &target.label));
+        }
+        match &fixed {
+            Some((size, label)) => Some(shown_as_is(value / size, label)),
             // In a program, an in-between value may have a unit with no
             // name (mA/V² for a MOSFET's k). It is shown in SI base units
             // and labelled as such, so the steps after it can still run.
-            _ => match shown_by_default(result.value, result.dim, parser.joules) {
-                Some(answer) => answer,
-                None if in_program => shown_as_is(result.value, "(SI)"),
-                None => return None,
-            },
+            None => shown_by_default(value, result.dim, joules)
+                .or_else(|| in_program.then(|| shown_as_is(value, "(SI)"))),
         }
     };
+
+    // The line beneath, and the value the answer stands for where that is
+    // not the one worked out: the standard value nearest it.
+    let mut beneath = None;
+    let mut stands_for = result.value;
+    let answer = if let Some(base) = base {
+        let Some(number) = whole_number(result).filter(|_| tolerance.is_none()) else {
+            *why = Some(Why::NotForBase(base));
+            return None;
+        };
+        in_base(number, Some(base))
+    } else if result.im != 0.0 {
+        shown_complex(result, target.as_ref(), parser.joules)?
+    } else if result.dim == TEMPERATURE && target.is_none() {
+        if result.kelvin().is_some_and(|kelvin| kelvin < -1e-9) {
+            *why = Some(Why::BelowZero);
+        }
+        shown_temperature(result, to_scale, parser.typed_scale(), scale_typed)?
+    } else if result.reading.is_some() {
+        return None;
+    } else if let Some(series) = &series {
+        if tolerance.is_some() {
+            return None;
+        }
+        if result.value <= 0.0 {
+            *why = Some(Why::NoStandard);
+            return None;
+        }
+        // A standard value is a round number in the unit it is shown in.
+        let size = fixed.as_ref().map_or_else(|| default_scale(result.value, result.dim), |(size, _)| *size);
+        let sought = result.value / size;
+        let (below, above) = series.around(sought)?;
+        let standard = |value: f64| show(value * size).map(|shown| series.written(shown));
+        let off = |value: f64| (value - sought) / sought;
+        let nearest = if below == above {
+            beneath = Some("exact".to_string());
+            below
+        } else if (off(above) + off(below)).abs() <= 1e-9 {
+            // Neither is nearer, and the engine does not choose.
+            *why = Some(Why::Midway(
+                spaced(&show(result.value)?),
+                spaced(&standard(below)?),
+                spaced(&standard(above)?),
+            ));
+            return None;
+        } else {
+            let (nearest, other) = if off(above) < -off(below) { (above, below) } else { (below, above) };
+            beneath = Some(format!(
+                "{}{GAP}other side: {}, {}",
+                percent_off(off(nearest)),
+                spaced(&standard(other)?),
+                percent_off(off(other))
+            ));
+            nearest
+        };
+        stands_for = nearest * size;
+        standard(nearest)?
+    } else {
+        show(result.value)?
+    };
+
+    // A tolerance: the answer is the value as worked out, and the two ends
+    // of the range go beneath it, each shown as the answer is.
+    let crossing = target.as_ref().is_some_and(|target| target.dim != result.dim);
+    if let Some(tolerance) = tolerance {
+        if crossing || series.is_some() {
+            return None;
+        }
+        let mut reader = Parser::new(tolerance, bare_m, part.names);
+        reader.kelvin = kelvin;
+        let amount = reader.sum()?.settled();
+        if reader.pos != tolerance.len() || !reader.has_value {
+            return None;
+        }
+        let ordinary = amount.im == 0.0 && amount.reading.is_none() && amount.value.is_finite();
+        let either_way = if !ordinary || amount.value < 0.0 {
+            *why = Some(Why::NoTolerance);
+            return None;
+        } else if amount.percent {
+            result.value.abs() * amount.value
+        } else if amount.dim == result.dim {
+            amount.value
+        } else {
+            *why = why_not_added(result, amount, 1.0);
+            return None;
+        };
+        let (low, high) = (show(result.value - either_way)?, show(result.value + either_way)?);
+        beneath = Some(format!("{} to {}", spaced(&low), spaced(&high)));
+    }
+    let answer = match beneath {
+        Some(beneath) => Answer { parts: Some(beneath), ..answer },
+        None => answer,
+    };
+    let ranged = tolerance.is_some();
+    let result = Quantity { value: stands_for, ..result };
 
     Some(Outcome {
         answer,
@@ -3222,9 +3645,9 @@ fn attempt_noting(
         hints: Hints::of(&parser),
         bare_text: parser.bare_text.take(),
         // A temperature asked for on a scale stays the same temperature
-        // only if it was a reading to begin with.
-        crossed: target.as_ref().is_some_and(|target| target.dim != result.dim)
-            || (to_scale.is_some() && result.reading.is_none()),
+        // only if it was a reading to begin with. A value with a tolerance
+        // is a range, and the engine has nowhere to hold one.
+        crossed: crossing || ranged || (to_scale.is_some() && result.reading.is_none()),
         used: Vec::new(),
     })
 }
@@ -3385,13 +3808,17 @@ pub fn evaluate_with_value_in(input: &str, kept: &[Kept]) -> Option<(Answer, f64
     // The answer to a formula, with the kept values it used beneath it.
     // Such an answer is offered to Claude to check (`given`) only when it
     // used none: Claude is not told the kept values.
+    // Input with a number in hexadecimal or binary in it has a whole
+    // answer shown in full, with the other bases beneath.
+    let based = mentions_base(whole);
+    let in_bases = |answer: Answer, quantity: Quantity| if based { with_bases(answer, quantity) } else { answer };
     let finished = |outcome: Outcome, given: bool, lone: bool| {
         let answer = Answer {
             given: given && outcome.used.is_empty(),
             uses: session.say_all(&outcome.used).filter(|_| !lone),
             ..outcome.answer
         };
-        (answer, outcome.quantity.magnitude_or_value())
+        (in_bases(answer, outcome.quantity), outcome.quantity.magnitude_or_value())
     };
     // A formula with its values after it. A comma means nothing else.
     if let Some(result) = given(whole, &session) {
@@ -3418,9 +3845,18 @@ pub fn evaluate_with_value_in(input: &str, kept: &[Kept]) -> Option<(Answer, f64
     if let Some(found) = decibels(&tokens, labelled) {
         return Some(found);
     }
+    // A number in another base, alone: its value. Any other number alone
+    // is not worth answering.
+    if based
+        && let [Token::Number(value)] = tokens[..]
+        && let Some(number) = whole_number(Quantity::plain(value))
+    {
+        return Some((in_base(number, None), value));
+    }
     let split = conversion_split(&tokens);
     // For a complex answer the value is its magnitude.
-    reading(&tokens, split, labelled).map(|outcome| (outcome.answer, outcome.quantity.magnitude_or_value()))
+    reading(&tokens, split, labelled)
+        .map(|outcome| (in_bases(outcome.answer, outcome.quantity), outcome.quantity.magnitude_or_value()))
 }
 
 /// Works out typed input, or a part of it, as ordinary maths. `split` is
@@ -3590,7 +4026,14 @@ impl Session {
 /// function or a constant. A prefix alone means nothing, so `k`, `f` and
 /// `T` are names like any other.
 fn keepable_name(name: &str) -> Result<(), Why> {
-    if !is_valid_name(name) || is_complex_function(name) || matches!(name, "j" | "π") || constant(name).is_some() {
+    // What may follow `to`: a base, or a series of standard values.
+    let asked_for = matches!(name, "hex" | "bin") || is_series(name);
+    if !is_valid_name(name)
+        || is_complex_function(name)
+        || matches!(name, "j" | "π")
+        || constant(name).is_some()
+        || asked_for
+    {
         return Err(Why::NameTaken(name.to_string()));
     }
     if is_unit_alone(name) || level(name).is_some() || is_gain(name) {
@@ -4974,6 +5417,236 @@ mod tests {
             "f = sqrt(k/m)/(2*pi), k = 100 N/m, m = 2 kg",
             "m could be a unit or the value you named m. Give the value another name, such as m_1.",
         );
+    }
+
+    /// The answer, and the line beneath it.
+    #[track_caller]
+    fn check_beneath(input: &str, expected: &str, beneath: &str) {
+        check_beneath_in(&[], input, expected, beneath);
+    }
+
+    #[track_caller]
+    fn check_beneath_in(kept: &[Kept], input: &str, expected: &str, beneath: &str) {
+        let answer = evaluate_in(input, kept).unwrap_or_else(|| panic!("no answer for {input:?}"));
+        let shown = format!("{} {}", answer.number, answer.unit);
+        assert_eq!(shown.trim_end(), expected, "for {input:?}");
+        // The gap in the line is written here as two spaces.
+        assert_eq!(answer.parts.map(|parts| parts.replace(GAP, "  ")).as_deref(), Some(beneath), "for {input:?}");
+    }
+
+    #[test]
+    fn the_nearest_standard_value() {
+        check_beneath("4.4kohm to E12", "4.7 kΩ", "+6.8 %  other side: 3.9 kΩ, −11.4 %");
+        check_beneath("4.4kohm to E6", "4.7 kΩ", "+6.8 %  other side: 3.3 kΩ, −25.0 %");
+        check_beneath("4.4kohm to E24", "4.3 kΩ", "−2.3 %  other side: 4.7 kΩ, +6.8 %");
+        check_beneath("4.4kohm to E48", "4.42 kΩ", "+0.45 %  other side: 4.22 kΩ, −4.1 %");
+        check_beneath("4.4kohm to E96", "4.42 kΩ", "+0.45 %  other side: 4.32 kΩ, −1.8 %");
+        check_beneath("4.4kohm to E192", "4.42 kΩ", "+0.45 %  other side: 4.37 kΩ, −0.68 %");
+        check_beneath("4.4kohm to e12", "4.7 kΩ", "+6.8 %  other side: 3.9 kΩ, −11.4 %");
+        // A value that is in the series.
+        check_beneath("4.7kohm to E12", "4.7 kΩ", "exact");
+        check_beneath("100 nF to E6", "100 nF", "exact");
+        check_beneath("1 ohm to E96", "1.00 Ω", "exact");
+        check_beneath("47 uH to E12", "47 µH", "exact");
+        // Worked out first, and of any kind.
+        check_beneath("(5 V - 2 V) / 20 mA to E24", "150 Ω", "exact");
+        check_beneath("1/(2*pi*10 kHz*10 kohm) to E12", "1.5 nF", "−5.8 %  other side: 1.8 nF, +13.1 %");
+        check_beneath("5 V to E12", "4.7 V", "−6.0 %  other side: 5.6 V, +12.0 %");
+        check_beneath("4.4k to E12", "4.7 k", "+6.8 %  other side: 3.9 k, −11.4 %");
+        // Across the edge of a decade, either way.
+        check_beneath("995 ohm to E12", "1.0 kΩ", "+0.50 %  other side: 820 Ω, −17.6 %");
+        check_beneath("1001 ohm to E12", "1.0 kΩ", "−0.100 %  other side: 1.2 kΩ, +19.9 %");
+        check_beneath("950 ms to E12", "1.0 s", "+5.3 %  other side: 820 ms, −13.7 %");
+        // It is a round number in the unit shown, which need not be SI.
+        check_beneath("2.5 in to E12", "2.7 in", "+8.0 %  other side: 2.2 in, −12.0 %");
+        check_beneath("8 L/min to E12", "8.2 L/min", "+2.5 %  other side: 6.8 L/min, −15.0 %");
+        // Copying gives the standard value.
+        assert_eq!(copied("4.4kohm to E12").as_deref(), Some("4700"));
+    }
+
+    #[test]
+    fn a_standard_value_is_not_chosen_between_two() {
+        why("4.3kohm to E12", "4.300 kΩ is midway between 3.9 kΩ and 4.7 kΩ.");
+        why("30 psi to E12", "30.00 psi is midway between 27 psi and 33 psi.");
+        check_beneath("4.3kohm to E24", "4.3 kΩ", "exact");
+        why("0 ohm to E12", "Only a value above zero has a nearest standard value.");
+        why("-5 ohm to E12", "Only a value above zero has a nearest standard value.");
+        // No such series, and nothing a series is for.
+        refuse("4.4kohm to E13");
+        refuse("4.4kohm to E3");
+        refuse("100 C to E12");
+        refuse("10 kelvin to E12");
+        refuse("(3 + 4j) ohm to E12");
+        refuse("5% to E12");
+        refuse("4.4kohm to E12 to ohm");
+        // Named, a prefix still needs its unit.
+        why("R1 = 4.4k to E12", "4.4k has a prefix but no unit.");
+    }
+
+    #[test]
+    fn the_series_are_the_published_ones() {
+        // Every value but one in E192 is the root of ten, to three figures.
+        for (n, value) in E192.iter().enumerate() {
+            let ruled = (10f64.powf(n as f64 / 192.0) * 100.0).round() / 100.0;
+            assert_eq!(*value, if n == 185 { 9.20 } else { ruled }, "E192 value {n}");
+        }
+        // E24 is not: these eight are the ones the standard has otherwise.
+        let odd: Vec<f64> = E24
+            .iter()
+            .enumerate()
+            .filter(|&(n, value)| (10f64.powf(n as f64 / 24.0) * 10.0).round() / 10.0 != *value)
+            .map(|(_, value)| *value)
+            .collect();
+        assert_eq!(odd, [2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 8.2]);
+        let e6: Vec<f64> = E24.iter().step_by(4).copied().collect();
+        assert_eq!(e6, [1.0, 1.5, 2.2, 3.3, 4.7, 6.8]);
+    }
+
+    #[test]
+    fn a_tolerance_gives_the_range() {
+        check_beneath("10kohm ± 5%", "10.00 kΩ", "9.500 kΩ to 10.50 kΩ");
+        check_beneath("10kohm +/- 5%", "10.00 kΩ", "9.500 kΩ to 10.50 kΩ");
+        check_beneath("10 kohm +/- 500 ohm", "10.00 kΩ", "9.500 kΩ to 10.50 kΩ");
+        check_beneath("3.3 V +/- 0.1 V", "3.300 V", "3.200 V to 3.400 V");
+        check_beneath("3.3 V +/- 100 mV", "3.300 V", "3.200 V to 3.400 V");
+        check_beneath("1kohm +/- 50%", "1.000 kΩ", "500.0 Ω to 1.500 kΩ");
+        check_beneath("10 +/- 0.5", "10.00", "9.500 to 10.50");
+        check_beneath("10 +/- 5%", "10.00", "9.500 to 10.50");
+        check_beneath("-12 V +/- 5%", "−12.00 V", "−12.60 V to −11.40 V");
+        // It comes last, and is a tolerance on all that is before it.
+        check_beneath("5 V * 10k / (10k + 4.7k) +/- 2%", "3.401 V", "3.333 V to 3.469 V");
+        check_beneath("10 V to mV +/- 5%", "10000 mV", "9500 mV to 10500 mV");
+        check_beneath("100 psi +/- 10%", "100.0 psi", "90.00 psi to 110.0 psi");
+        check_beneath("Vout = 3.3 V +/- 5%", "3.300 V", "3.135 V to 3.465 V");
+        check_beneath(
+            "Vout = Vin * R2 / (R1 + R2) +/- 2%, Vin = 5 V, R1 = 4.7kohm, R2 = 10kohm",
+            "3.401 V",
+            "3.333 V to 3.469 V",
+        );
+        // Copying gives the value, as it does without the tolerance.
+        assert_eq!(copied("10kohm +/- 5%").as_deref(), Some("10000"));
+        // A plus and a minus with nothing between them is as it was.
+        check("3 +- 1", "2.000");
+        check("3 + -1", "2.000");
+    }
+
+    #[test]
+    fn what_a_tolerance_may_not_be() {
+        why("10kohm +/- 5", "A resistance and a plain number cannot be added.");
+        why("10 V +/- 2 A", "A voltage and a current cannot be added.");
+        why("10 V +/- -1 V", "A tolerance is a percentage, or an amount from zero up.");
+        // Not on a value inside a sum, where the range of the answer is
+        // another matter, and not twice.
+        refuse("5 V * 10kohm +/- 5% / 14.7kohm");
+        refuse("(10kohm +/- 5%) * 2");
+        refuse("10kohm +/- 5% +/- 1%");
+        refuse("10kohm +/- 5% to ohm");
+        refuse("10kohm +/-");
+        // Nor on a temperature, a level, a complex number, a value shown as
+        // another kind, a standard value or a number in another base.
+        refuse("25 C +/- 2 K");
+        refuse("10 kelvin +/- 5%");
+        refuse("10 dBm +/- 1 dB");
+        refuse("(3 + 4j) ohm +/- 5%");
+        refuse("1500 rpm to Hz +/- 1%");
+        refuse("4.4kohm to E12 +/- 5%");
+        refuse("255 to hex +/- 1");
+        // A value given after a formula is one value.
+        refuse("Vout = Vin * 2, Vin = 5 V +/- 5%");
+        // A range is not a value, so it is not kept.
+        not_kept(&[], "R1 = 10kohm +/- 5%", "That answer cannot be kept under a name.");
+    }
+
+    #[test]
+    fn hexadecimal_and_binary() {
+        // Alone, a number in another base is worth answering.
+        check_beneath("0xFF", "255", "0xFF  0b1111 1111");
+        check_beneath("0b1010", "10", "0xA  0b1010");
+        check_beneath("0X1f", "31", "0x1F  0b1 1111");
+        check_beneath("0B11", "3", "0x3  0b11");
+        // A whole answer to input that used one is shown in full.
+        check_beneath("0xFF + 1", "256", "0x100  0b1 0000 0000");
+        check_beneath("0xFFFF + 1", "65536", "0x10000  0b1 0000 0000 0000 0000");
+        check_beneath("0b1111 + 0b1", "16", "0x10  0b1 0000");
+        check_beneath("n = a + b, a = 0x10, b = 0b11", "19", "0x13  0b1 0011");
+        // Asked for.
+        check_beneath("255 to hex", "0xFF", "255  0b1111 1111");
+        check_beneath("255 to bin", "0b1111 1111", "255  0xFF");
+        check_beneath("0b1010 to hex", "0xA", "10  0b1010");
+        check_beneath("1024 * 64 to hex", "0x10000", "65536  0b1 0000 0000 0000 0000");
+        check_beneath("0.1 * 30 to hex", "0x3", "3  0b11");
+        check_beneath("n = a + b to hex, a = 16, b = 3", "0x13", "19  0b1 0011");
+        // Copying gives the big line, and a binary number without spaces.
+        assert_eq!(copied("0xFF + 1").as_deref(), Some("256"));
+        assert_eq!(copied("255 to hex").as_deref(), Some("0xFF"));
+        assert_eq!(copied("255 to bin").as_deref(), Some("0b11111111"));
+        // An answer that is not a whole number from nought up is as ever.
+        check("0x10 * 2 V", "32.00 V");
+        check("0xFF / 2", "127.5");
+        check("0x10 - 0x20", "−16.00");
+        assert_eq!(evaluate("0x10 * 2 V").unwrap().parts, None);
+        // As far as whole numbers are exact, and no further.
+        check("0x1FFFFFFFFFFFFF", "9007199254740991");
+        check("2^53 to hex", "0x20000000000000");
+        refuse("0x20000000000001");
+        let reason = "Only a whole number from 0 to 2^53, with no unit, can be written in hexadecimal.";
+        why("2^53 + 2 to hex", reason);
+        why("2.5 to hex", reason);
+        why("-1 to hex", reason);
+        why("5 V to hex", reason);
+        why("2.5 to bin", "Only a whole number from 0 to 2^53, with no unit, can be written in binary.");
+        // Not a number in another base.
+        refuse("0x1G");
+        refuse("0xFFV");
+        refuse("0b102");
+        refuse("0xFF.5");
+    }
+
+    #[test]
+    fn a_times_sign_is_still_a_times_sign() {
+        // Only a nought, an `x` and a digit, at the start of a number, is
+        // hexadecimal. It used to be nought times the rest.
+        check("2x3", "6.000");
+        check("2 x 3", "6.000");
+        check("3x10 V", "30.00 V");
+        check("0 x 10", "0");
+        check("10x0x5", "0");
+        check("1.0x10", "10.00");
+        assert_eq!(evaluate("2x3").unwrap().parts, None);
+        // Without a number in another base, a whole answer is as it was.
+        check("255 + 1", "256.0");
+        check("2^16", "65.54 k");
+    }
+
+    #[test]
+    fn the_helpers_with_kept_values() {
+        let kept = session(&["Vcc = 5 V", "Rs = 220 ohm", "mask = 0xFF", "R1 = 4.4kohm to E12"]);
+        check_beneath_in(&kept, "(Vcc - 2 V) / 20 mA to E24", "150 Ω", "exact");
+        check_beneath_in(&kept, "Rs to E6", "220 Ω", "exact");
+        check_beneath_in(&kept, "Vcc * 2 +/- 100 mV", "10.00 V", "9.900 V to 10.10 V");
+        check_beneath_in(&kept, "mask to hex", "0xFF", "255  0b1111 1111");
+        check_beneath_in(&kept, "mask + 0x01", "256", "0x100  0b1 0000 0000");
+        // The line that says what was used is there as well.
+        assert_eq!(evaluate_in("Rs to E6", &kept).unwrap().uses.as_deref(), Some("Rs = 220.0 Ω"));
+        // What is kept from a standard value is the standard value.
+        check_in(&kept, "R1 * 2", "9.400 kΩ", Some("R1 = 4.700 kΩ"));
+        // A kept value does not remember the base it was typed in.
+        check_in(&kept, "mask + 1", "256.0", Some("mask = 255.0"));
+        // What may follow `to` cannot be kept, or `to E12` would change.
+        let taken = |name: &str| format!("{name} already means something here, so it cannot name a value.");
+        for name in ["E6", "E12", "E24", "E48", "E96", "E192", "e12", "hex", "bin"] {
+            not_kept(&[], &format!("{name} = 5 V"), &taken(name));
+        }
+        assert_eq!(session(&["E13 = 5 V"]).len(), 1);
+    }
+
+    #[test]
+    fn programs_have_no_helpers() {
+        // The language Claude writes in has no standard values, tolerances
+        // or `to hex`. Claude is not told of them.
+        assert!(run(&[expression("R", "4.4kohm to E12")]).is_err());
+        assert!(run(&[expression("R", "10kohm +/- 5%")]).is_err());
+        assert!(run(&[expression("n", "255 to hex")]).is_err());
     }
 
     #[test]

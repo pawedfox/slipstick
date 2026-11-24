@@ -14,10 +14,11 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.16.0, not yet released. The latest release is 0.11.0,
+Status: version 0.17.0, not yet released. The latest release is 0.11.0,
 which does not yet say why it refused an input, take a formula with its
 values after it, solve for a value left out, keep a value under a name,
-or know the constants, electronvolts and moles. It is one person's tool,
+know the constants, electronvolts and moles, or have standard values,
+tolerances, hexadecimal and binary. It is one person's tool,
 in daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
@@ -63,6 +64,9 @@ No account and no network. The answer changes with every key.
 | `eps_0 * 1 cm^2 / 1 mm` | 885.4 fF |
 | `h_P * c_0 / 650 nm to eV` | 1.907 eV |
 | `1 mol * R_gas * 273.15 K / 1 atm` | 22.41 L |
+| `(5 V - 2 V) / 20 mA to E24` | 150 Ω |
+| `3.3 V +/- 5%` | 3.300 V, with 3.135 V to 3.465 V beneath |
+| `0xFF + 1` | 256, with 0x100 and 0b1 0000 0000 beneath |
 
 It understands:
 
@@ -93,6 +97,32 @@ It understands:
   (`g0 = 9.807 m/s²`), so you see the value that went in. Type one alone
   to see it. A single letter is never a constant: `g` is the gram, `k` is
   kilo, and `c` and `q` are yours to name. Write `2 * c0`, not `2 c0`.
+- **Standard values, tolerances, hexadecimal and binary.** Each goes at
+  the end of what you type and puts a line beneath the answer:
+
+  | You type | It shows | Beneath |
+  |---|---|---|
+  | `4.4kohm to E12` | 4.7 kΩ | +6.8 %, and the other side: 3.9 kΩ, −11.4 % |
+  | `1/(2*pi*10 kHz*10 kohm) to E12` | 1.5 nF | −5.8 %, and the other side: 1.8 nF, +13.1 % |
+  | `10kohm +/- 5%` | 10.00 kΩ | 9.500 kΩ to 10.50 kΩ |
+  | `3.3 V +/- 100 mV` | 3.300 V | 3.200 V to 3.400 V |
+  | `0b1010` | 10 | 0xA and 0b1010 |
+  | `255 to hex` | 0xFF | 255 and 0b1111 1111 |
+  | `255 to bin` | 0b1111 1111 | 255 and 0xFF |
+
+  - `to E6`, `E12`, `E24`, `E48`, `E96` or `E192` gives the nearest
+    standard value of that series, for a resistor, a capacitor or anything
+    else. Beneath is how far off it is, and the standard value on the
+    other side, so you can take the next one up or down. A value exactly
+    midway between two is refused, and Enter names them both.
+  - `+/-` (or `±`) and a percentage or an amount gives the range. It comes
+    last and is a tolerance on everything before it. It does not work out
+    the range of an answer from several values that each have a tolerance.
+  - `0x` and `0b` start a number in hexadecimal or binary. A whole answer
+    to input that used one is shown in full, with the other bases beneath;
+    `to hex` and `to bin` put that base on the big line. Whole numbers
+    from 0 to 2^53 only. `2x3` is still two times three: only a nought,
+    an `x` and a digit at the start of a number is hexadecimal.
 - **Conversions** with `to` (or `in`): `25 mm to in`. Between rpm and Hz
   one revolution is one cycle, so `50 Hz to rpm` is 3000 rpm. The two are
   never mixed in a sum.
@@ -169,6 +199,8 @@ exactly why, it says so:
 | `tau = RC, R = 1Mohm, C = 22uF` | RC is read as one name. Write it as R*C. |
 | `V = I * R, V = 12V` | Two values are not given: I and R. |
 | `y^2 - 5*y + 6 = 0` | More than one value of y fits: 2.000 and 3.000. |
+| `4.3kohm to E12` | 4.300 kΩ is midway between 3.9 kΩ and 4.7 kΩ. |
+| `2.5 to hex` | Only a whole number from 0 to 2^53, with no unit, can be written in hexadecimal. |
 
 Click the answer, or press Ctrl+C with nothing selected, to copy the plain
 number. The up and down arrows recall earlier inputs.
@@ -316,6 +348,9 @@ decided and why, and what has and has not been tested.
 - Memory of your notation and preferences.
 - A list of the values you have kept, and a way to forget one without
   quitting.
+- The range of an answer worked out from several values that each have a
+  tolerance, such as a divider made of two 5 % resistors.
+- Negative numbers and bitwise operations in hexadecimal and binary.
 - Not tested: Windows 10, and displays scaled above 125%.
 - Answers from Claude are checked against a set of 46 reference problems.
   The instructions given to Claude were tuned on that same set, so passing
