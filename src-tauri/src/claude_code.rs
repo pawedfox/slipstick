@@ -157,14 +157,29 @@ struct Process {
 /// one it was started with.
 pub fn find_program() -> Option<PathBuf> {
     let on_path = std::env::var_os("PATH").map(|path| std::env::split_paths(&path).collect::<Vec<_>>());
-    let usual = [
+    #[cfg_attr(windows, allow(unused_mut))]
+    let mut usual: Vec<PathBuf> = [
         std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join(".local").join("bin")),
         std::env::var_os("APPDATA").map(|roaming| PathBuf::from(roaming).join("npm")),
-    ];
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // macOS trial. An app started from Finder has a short PATH with none
+    // of the folders a terminal adds, so the usual ones are looked in: the
+    // native install's (documented), then Homebrew's and npm's (from
+    // general knowledge of macOS, not from Claude Code's pages).
+    #[cfg(not(windows))]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            usual.push(PathBuf::from(home).join(".local").join("bin"));
+        }
+        usual.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+    }
     on_path
         .into_iter()
         .flatten()
-        .chain(usual.into_iter().flatten())
+        .chain(usual)
         .flat_map(|folder| ["claude.exe", "claude.cmd", "claude"].map(|name| folder.join(name)))
         .find(|candidate| candidate.is_file())
 }

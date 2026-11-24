@@ -328,6 +328,10 @@ fn summon(app: &AppHandle) {
         // Screens can change while hidden (resolution, taskbar, unplugging).
         place(app, &window);
     }
+    // macOS trial: the app was hidden when the window was dismissed, so
+    // that focus went back to what the user was doing. Show it again.
+    #[cfg(target_os = "macos")]
+    let _ = app.show();
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_always_on_top(true);
@@ -339,6 +343,10 @@ fn dismiss(app: &AppHandle) {
     if let Some(window) = main_window(app) {
         let _ = window.hide();
     }
+    // macOS trial: hiding a window leaves the app in front with nothing to
+    // show. Hiding the app hands focus back to the one that had it.
+    #[cfg(target_os = "macos")]
+    let _ = app.hide();
     save_settings(app);
 
     // Do not leave Claude Code running behind a hidden window for long.
@@ -707,6 +715,11 @@ pub fn run() {
             pause_hotkey
         ])
         .setup(|app| {
+            // macOS trial: no Dock icon and no menu bar of its own. The app
+            // lives in the menu bar's tray, as it lives in the tray on Windows.
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let handle = app.handle().clone();
 
             let mut settings = settings::load(&handle);

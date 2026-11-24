@@ -1,0 +1,71 @@
+# Builds a trial copy of the app for macOS whenever the macos-trial branch
+# is pushed, and keeps it as a download on the run's page for two weeks.
+#
+# It is not a release. Nothing is published and no tag is made. The app is
+# signed "ad hoc", which Apple Silicon requires of anything downloaded and
+# which costs nothing; macOS will still ask the user to allow it.
+#
+# The download is on a public repository, so anyone signed in to GitHub
+# who finds the run can fetch it. It is built from this branch's source
+# and holds nothing that is not in it.
+
+name: macOS trial
+
+on:
+  push:
+    branches:
+      - macos-trial
+
+permissions:
+  contents: read
+
+jobs:
+  mac:
+    # GitHub's current macOS machines are Apple Silicon.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install the window's dependencies
+        run: npm ci
+
+      - name: Run the engine's tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      # `--bundles app` makes Slipstick.app and nothing else; the bundle
+      # list in tauri.conf.json names only the Windows installer.
+      - name: Build the app
+        run: >
+          npm run tauri build -- --bundles app
+          --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+
+      - name: Say what was built
+        run: |
+          uname -m
+          file src-tauri/target/release/bundle/macos/Slipstick.app/Contents/MacOS/*
+          codesign --display --verbose=2 src-tauri/target/release/bundle/macos/Slipstick.app 2>&1 | head -12
+
+      # ditto keeps what makes an app an app, which zip does not.
+      - name: Pack it
+        run: >
+          ditto -c -k --keepParent
+          src-tauri/target/release/bundle/macos/Slipstick.app
+          Slipstick-macos-trial.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Slipstick-macos-trial
+          path: Slipstick-macos-trial.zip
+          retention-days: 14

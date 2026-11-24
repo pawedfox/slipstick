@@ -1075,13 +1075,17 @@ input.addEventListener("input", () => {
   void evaluateInstantly();
 });
 
+// macOS trial: a Mac's shortcuts are on Cmd where Windows has them on Ctrl.
+const onMac = /Mac/.test(navigator.userAgent);
+const commandKey = (event: KeyboardEvent) => (onMac ? event.metaKey : event.ctrlKey);
+
 input.addEventListener("keydown", (event) => {
   // The problem in the box has been sent. Typing or pasting now starts a
   // new problem in its place; an editing key means the old one is being
   // changed instead.
   if (replaceOnType) {
     const typing = event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey;
-    const pasting = event.key.toLowerCase() === "v" && event.ctrlKey;
+    const pasting = event.key.toLowerCase() === "v" && commandKey(event);
     if (typing || pasting) input.select();
     if (typing || pasting || /^(Arrow|Home|End|Backspace|Delete)/.test(event.key)) replaceOnType = false;
   }
@@ -1232,7 +1236,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   // Ctrl+comma opens and closes the settings.
-  if (event.key === "," && event.ctrlKey && !event.altKey && !event.shiftKey) {
+  if (event.key === "," && commandKey(event) && !event.altKey && !event.shiftKey) {
     event.preventDefault();
     toggleSettings();
     return;
@@ -1240,7 +1244,7 @@ window.addEventListener("keydown", (event) => {
   // Ctrl+C with nothing selected copies the answer.
   const nothingSelected =
     input.selectionStart === input.selectionEnd && !window.getSelection()?.toString();
-  if (event.key.toLowerCase() === "c" && event.ctrlKey && !event.altKey && nothingSelected) {
+  if (event.key.toLowerCase() === "c" && commandKey(event) && !event.altKey && nothingSelected) {
     event.preventDefault();
     void copyAnswer();
   }
