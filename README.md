@@ -14,8 +14,9 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.18.0. It is one person's tool, in daily use by its
-author; expect rough edges. See
+Status: version 0.19.0, not yet released. The latest release is 0.18.0,
+which has no Clear memory button. It is one person's tool, in daily use
+by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
@@ -177,7 +178,10 @@ It understands:
   name cannot be a unit (`V`, `C`, `m`), because `V * 2` already means two
   volts; use `V1` or `Vin`. Straight after a number a word is still a unit
   or a prefix, so with `k` kept, `2k` is two thousand and twice k is
-  `2 * k`. Kept values are held in memory only.
+  `2 * k`. Kept values are held in memory only. While any are kept, a
+  **Clear memory** button shows under the settings and hide controls at
+  the top right: one click forgets them all, as quitting does. Point at
+  it to see which names it would forget.
 
 - **Steps, with no AI.** An answer worked out from named values has a
   **Steps** control: a formula with its values after it, anything that
@@ -362,8 +366,8 @@ decided and why, and what has and has not been tested.
 - The installer is not signed.
 - A way to use Claude without Claude Code installed.
 - Memory of your notation and preferences.
-- A list of the values you have kept, and a way to forget one without
-  quitting.
+- A list of the values you have kept, and a way to forget one and leave
+  the rest.
 - The range of an answer worked out from several values that each have a
   tolerance, such as a divider made of two 5 % resistors.
 - Negative numbers and bitwise operations in hexadecimal and binary.

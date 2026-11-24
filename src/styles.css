@@ -139,6 +139,28 @@ body {
   background: var(--ink);
 }
 
+/* ---- clear memory ---- */
+
+/* Under the gear and the minimise line, and in the page only while a value
+   is kept. Quiet until pointed at, as the gear is. The margins draw it up
+   toward the two controls, so that it costs the shell little height. */
+.forget {
+  align-self: flex-end;
+  margin: -3px 10px -6px 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--soft);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.forget:hover {
+  color: var(--accent);
+}
+
 /* ---- settings ---- */
 
 /* The gear is quiet until pointed at: orange is for the prompt, focus and

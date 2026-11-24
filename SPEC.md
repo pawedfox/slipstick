@@ -36,6 +36,11 @@ binary (see "Helpers for the trade").
 engine with no model (see "Steps for instant answers").
 That is the last slice listed under "Hardening the engine". Next on the
 roadmap is item 2, macOS, which starts with a short trial on a real Mac.
+A trial build for it was made on 2026-11-24, on the `macos-trial` branch,
+and has not been tried yet.
+0.19.0 (2026-11-24, not released): a Clear memory button on the bar
+forgets the values kept for the session without quitting. The user asked
+for it; see "Clear memory" under "Named values that last the session".
 
 ## Purpose
 
@@ -468,6 +473,10 @@ while the test copy runs.
   terminal style, so the running app, not the mockup, is the reference.
 - A minimise button (a short, thick orange line) at the top-right of the
   shell hides the window, the same as Esc.
+- **Clear memory** (0.19.0), in small quiet text under the gear and the
+  minimise button, and in the window only while a value is kept for the
+  session. It forgets them all. See "Clear memory" under "Named values
+  that last the session".
 - **The OS window never resizes.** It is a fixed 444×660 px transparent
   rectangle (the shell plus a 12 px margin for the shadow), clipped to the
   part in use. Resizing it from the top edge made the content flicker.
@@ -1248,8 +1257,46 @@ no longer in doubt. `x_1 = 100 N/k, k = 50 N/m` was refused with "k could
 be a unit or the value you named k" and is now 2.000 m. A unit's own
 letter there (`m`) is refused as before.
 
-Not done: forgetting one value, or all of them, short of quitting the
-app; a list of what is kept; telling Claude the kept values; keeping the
+**Clear memory (0.19.0).** Asked for by the user on 2026-11-24, so that
+the app need not be quit to start afresh. They chose what it forgets (the
+kept values, not the history the arrows recall) and where it goes, in
+their own words: "Clear memory button under where Settings and - is".
+
+- **A button labelled "Clear memory"**, right-aligned under the gear and
+  the minimise button. It is in the window only while at least one value
+  is kept, and not while the settings are open. That it comes and goes
+  was not put to the user; it follows "Keep the UI minimal".
+- **One click forgets every kept value,** as quitting does. There is no
+  confirmation: a value is kept again with one Enter. The message row
+  says how many went: "3 kept values forgotten."
+- **The input is then read again with nothing kept.** An answer that used
+  a kept value does not stay on screen, since it no longer follows from
+  what is typed. An answer from Claude is left as it is: Claude is never
+  told the kept values.
+- **Pointing at it lists what would go:** "Forget the values kept: R1,
+  R2, Vcc". That tooltip is the only list of what is kept.
+- **The mouse only.** Like the gear and the minimise button it is not a
+  stop for the Tab key, so that focus stays in the input. There is no
+  key for it.
+- It adds about 17 px to the shell while it shows, through the same
+  `update()` as every other change of height.
+- "Memory" here is the calculator's sense of the word. It is not the
+  memory notes file under "Memory", which is not built.
+- The message at the limit of 200 kept values now points to the button,
+  where it used to say to quit.
+
+Checked for 0.19.0 (2026-11-24), in the window in the built-in browser
+with the real engine behind it: the button is absent with nothing kept,
+appears on the first value kept, lists the names when pointed at, and
+sits under the two corner controls in line with the Steps control; one
+click removes three kept values, clears an answer that used them and says
+so; a name then means nothing until it is kept again; the button is
+hidden while the settings are open and back afterwards; and its colour
+in the light theme is the quiet one. No engine code changed, and the 106
+unit tests pass. Not checked: the real app.
+
+Not done: forgetting one value and leaving the rest; a list of what is
+kept, beyond the button's tooltip; telling Claude the kept values; keeping the
 value an equation was solved for; keeping a level in decibels; a kept
 value in a conversion to decibels; and showing a kept value with no
 nameable unit when its name is typed alone.

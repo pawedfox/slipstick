@@ -43,6 +43,7 @@ const single = el<HTMLElement>("single");
 const comparison = el<HTMLElement>("comparison");
 const bar = input.parentElement as HTMLElement;
 const gear = el<HTMLButtonElement>("gear");
+const forget = el<HTMLButtonElement>("forget");
 const settingsPanel = el<HTMLElement>("settings");
 const hotkeyButton = el<HTMLButtonElement>("hotkey");
 const claudeState = el<HTMLElement>("claude-state");
@@ -191,6 +192,9 @@ const state = {
   /** The input Enter has just kept under its name, or said it could not.
    *  Enter on it again does not keep it a second time. */
   keptText: null as string | null,
+  /** The names of the values kept for the session, in the order they were
+   *  kept. While there are any, the Clear memory button is shown. */
+  keptNames: [] as string[],
   /** The settings. These are the defaults until the Rust side has answered. */
   settings: {
     hotkey: "Ctrl+Alt+C",
@@ -273,6 +277,10 @@ function render() {
     ? null
     : `${settings.hotkey} is in use by another program, so the shortcut is off. Choose another in settings (Ctrl+,).`;
   const text = state.asking ? "Asking Claude" : (state.message ?? standing);
+
+  // Clear memory is there only while something is kept, and says what.
+  forget.hidden = !state.keptNames.length || inSettings;
+  forget.title = `Forget the values kept: ${state.keptNames.join(", ")}`;
 
   // No attribute means the colours follow Windows.
   if (settings.theme === "system") delete document.documentElement.dataset.theme;
@@ -909,7 +917,7 @@ async function keepNamed(text: string, answered: boolean): Promise<boolean> {
     // Kept again, a name's earlier value goes.
     const at = kept.findIndex((other) => other.name === name);
     if (at < 0 && kept.length >= KEPT_LIMIT) {
-      reason = `No more values can be kept: there are ${KEPT_LIMIT}. Quitting Slipstick clears them.`;
+      reason = `No more values can be kept: there are ${KEPT_LIMIT}. Clear memory, at the top right, forgets them.`;
     } else {
       if (at >= 0) kept.splice(at, 1);
       kept.push(entry);
@@ -924,10 +932,40 @@ async function keepNamed(text: string, answered: boolean): Promise<boolean> {
     state.stale = false;
   }
   state.keptText = text;
+  state.keptNames = kept.map((value) => value.name);
   state.offer = false;
   state.message = reason;
   void update();
   return true;
+}
+
+/** Clear memory: forgets every value kept for the session, as quitting
+ *  does. The input is then read again with nothing kept, so an answer that
+ *  used one of them does not stay on screen. An answer from Claude is left
+ *  as it is: Claude is never told the kept values. */
+async function forgetKept() {
+  const count = kept.length;
+  if (!count) return;
+  kept.length = 0;
+  state.keptNames = [];
+  state.keptText = null;
+  if (state.shown && !state.fromClaude) {
+    const ticket = ++evaluation;
+    const text = input.value;
+    const result = text.trim()
+      ? await invoke<(Value & { steps?: Step[] }) | null>("evaluate", { input: text, kept })
+      : null;
+    if (ticket === evaluation) {
+      state.shown = result;
+      state.stale = false;
+      state.stepsOpen = false;
+    }
+  }
+  state.offer = false;
+  state.explained = null;
+  state.message = count === 1 ? "1 kept value forgotten." : `${count} kept values forgotten.`;
+  input.focus();
+  void update();
 }
 
 // ---- input ---------------------------------------------------------------
@@ -1213,6 +1251,8 @@ toggle.addEventListener("click", () => {
 });
 
 minimise.addEventListener("click", () => void invoke("hide_window"));
+
+forget.addEventListener("click", () => void forgetKept());
 
 // ---- window-level keys ---------------------------------------------------
 

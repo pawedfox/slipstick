@@ -17,8 +17,9 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.18.0, the current release (2026-11-24). The one before it was
-0.11.0; 0.12.0 to 0.17.0 were never tagged. Work follows
+Version 0.19.0, not yet released; 0.18.0 is the current release
+(2026-11-24). The one before it was 0.11.0; 0.12.0 to 0.17.0 were never
+tagged. 0.19.0 adds the Clear memory button (see "Layout"). Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -52,7 +53,10 @@ when the mission was re-framed (see "Purpose" in `SPEC.md`):
   with named values in it has Steps, made by the engine with no model
   (`Worked`, `Trace` and `Form::account` in `calc.rs`; "Steps for
   instant answers" in `SPEC.md`, and the design the user chose under
-  "Steps without a model"). That was the last slice listed. After
+  "Steps without a model"). That was the last slice listed. A trial
+  build for macOS is on the `macos-trial` branch, built by
+  `.github/workflows/mac-trial.yml` there; it is a trial and not the
+  port, and nothing on it is on `main`. After
   the engine come macOS, then one small
   provider-neutral route, then Linux, then a formula library. What was
   found is under "Models other than Claude" and "Other operating systems"
@@ -232,6 +236,11 @@ Run from the repo root unless noted.
 - In `main.ts`, everything on screen is derived from the one `state` object
   by `render()`, and only `update()` calls `render()`. Change the state and
   call `update()`; never write to the page from anywhere else.
+- The values kept for the session are a list outside `state` (`kept`),
+  because the engine is handed it as it is. Their names are mirrored in
+  `state.keptNames`, which is what `render()` reads; change the two
+  together. The Clear memory button (`#forget`, `forgetKept`) is in the
+  window only while that list has something in it, and is not a Tab stop.
 - The input is first in `index.html` so keyboard focus lands on it; CSS
   (`order`) puts it at the bottom. Keep it the first focus stop.
 - The 12 px shell margin is defined in three places that must agree:
