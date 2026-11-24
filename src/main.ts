@@ -70,6 +70,10 @@ type Value = {
   /** The values kept for the session that an instant answer used:
    *  `Vcc = 9.000 V, R1 = 10.00 kΩ`. Shown beneath it. */
   uses?: string;
+  /** How a power typed straight after a value with its unit was read:
+   *  `read as (12 V)²`, for `12V^2`. Shown beneath the answer, since it
+   *  could have been twelve square volts. */
+  read?: string;
 };
 
 /** A value kept under a name for the session (`R1 = 10kohm`, then `R1` in
@@ -323,16 +327,18 @@ function render() {
     if (toggle.parentElement !== host) host.append(toggle);
 
     // A complex answer's real and imaginary parts go first, on their own.
+    // Then how a power after a value was read, where it had two meanings.
     // Then the kept values an instant answer used, so that a value kept
     // some time ago is never used unseen.
     also.replaceChildren(
       ...(shown.parts ? [line("also-line parts", shown.parts)] : []),
+      ...(shown.read ? [line("also-line parts", shown.read)] : []),
       ...(shown.uses ? [line("also-line parts", ...usedNodes(shown.uses))] : []),
       ...(shown.also ?? []).map((value) =>
         line("also-line", ...mathNodes(value.name ?? ""), ` = ${spaced(value)}`),
       ),
     );
-    also.hidden = !shown.parts && !shown.uses && !shown.also?.length;
+    also.hidden = !shown.parts && !shown.read && !shown.uses && !shown.also?.length;
 
     formula.replaceChildren(...mathNodes(shown.formula ?? ""));
     formula.hidden = !shown.formula;

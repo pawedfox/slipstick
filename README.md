@@ -14,9 +14,10 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.19.0, not yet released. The latest release is 0.18.0,
-which has no Clear memory button. It is one person's tool, in daily use
-by its author; expect rough edges. See
+Status: version 0.20.0, not yet released. The latest release is 0.18.0,
+which has no Clear memory button and reads `12V^2` as twelve square
+volts (see "A power after a value" below). It is one person's tool, in
+daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 
 ## What it does
@@ -137,6 +138,13 @@ It understands:
   `47 in dB` is left to Claude.
 - `||` for parallel, `x` or `×` for multiply, `²` and `³`, `√`, `π`, `%`,
   and the usual functions (`sqrt ln log exp sin cos tan asin acos atan abs`).
+- **A power after a value** is a power of the whole value: `12V^2 / 8ohm`
+  is 18.00 W, twelve volts squared over eight ohms. It could also have
+  meant twelve square volts, so the answer says beneath how it was read:
+  "read as (12 V)²". A length is the exception, because `25mm^2` is an
+  area: there the power stays on the unit, as it does in `9.81 m/s^2`.
+  Write `(25mm)^2` to square a length. A result in a squared unit is
+  shown as one: `5V * 5V` is 25.00 V².
 - **Complex numbers.** `j` is the imaginary unit, before or after a number:
   `3 + j4`, `j*2*pi*1kHz*100mH`. A magnitude and angle is typed with `∠`
   or `@`: `230 V @ 120°`. The answer shows the magnitude and angle, with

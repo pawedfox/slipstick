@@ -169,12 +169,29 @@ pub struct Answer {
     /// shows them behind its Steps control.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub steps: Option<Vec<Worked>>,
+    /// How a power typed straight after a value with its unit was read:
+    /// `read as (12 V)²`, for `12V^2`. It could have been twelve square
+    /// volts, so the window says beneath the answer which it was taken as.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read: Option<String>,
 }
 
 impl Answer {
     fn real(number: String, unit: String, copy: String) -> Self {
-        Self { number, unit, copy, angle: None, parts: None, given: false, uses: None, steps: None }
+        Self { number, unit, copy, angle: None, parts: None, given: false, uses: None, steps: None, read: None }
     }
+}
+
+/// The line beneath an answer that says how powers were read:
+/// `read as (12 V)²`, or `read as (12 V)², (2 A)²`.
+fn read_line(readings: &[String]) -> Option<String> {
+    let mut said: Vec<&str> = Vec::new();
+    for reading in readings {
+        if !said.contains(&reading.as_str()) {
+            said.push(reading);
+        }
+    }
+    (!said.is_empty()).then(|| format!("read as {}", said.join(", ")))
 }
 
 /// One step of an answer the engine gave by itself, as the window shows
@@ -849,6 +866,15 @@ struct Parser<'a> {
     why: Option<Why>,
     /// The first value typed with a prefix and no unit, as typed: `4.7k`.
     bare_text: Option<String>,
+    /// Set by `power` as it asks for its base, and taken by `operand`: a
+    /// value read then may leave a power for `power` to put on all of it.
+    from_power: bool,
+    /// A value just read that left a power alone, as it will be written
+    /// in the note: `12 V`.
+    left_power: Option<String>,
+    /// Each value whose power was put on all of it, as the note beneath
+    /// the answer says it was read: `(12 V)²`.
+    read_as: Vec<String>,
 }
 
 /// The deepest nesting the parser will follow: about a hundred brackets
@@ -890,6 +916,9 @@ impl<'a> Parser<'a> {
             saw_pi: false,
             why: None,
             bare_text: None,
+            from_power: false,
+            left_power: None,
+            read_as: Vec::new(),
         }
     }
 
@@ -1132,7 +1161,10 @@ impl<'a> Parser<'a> {
 
     /// Right-associative, and tighter than a leading minus: `-2^2` is -4.
     fn power(&mut self) -> Option<Quantity> {
+        self.from_power = true;
         let mut base = self.primary()?;
+        // A value such as `12V` that left the power after it for here.
+        let whole = self.left_power.take();
         if self.typed_input() && self.take(Token::Angle) {
             base = self.polar(base)?;
         }
@@ -1146,12 +1178,38 @@ impl<'a> Parser<'a> {
             self.pos += 1;
             self.interesting = true;
             base = self.to_power(base, Quantity::plain(f64::from(n)))?;
+            if let Some(value) = &whole {
+                self.note_read(format!("({value}){}", superscript(n)));
+            }
         }
         if self.take(Token::Caret) {
             let exponent = self.unary()?;
+            if let Some(value) = &whole {
+                let n = exponent.value;
+                let power = if n == 2.0 || n == 3.0 { superscript(n as i32) } else { format!("^{}", plain_copy(n)) };
+                self.note_read(format!("({value}){power}"));
+            }
             self.to_power(base, exponent)
         } else {
             Some(base)
+        }
+    }
+
+    /// Notes a value whose power was put on all of it, once.
+    fn note_read(&mut self, reading: String) {
+        if !self.read_as.contains(&reading) {
+            self.read_as.push(reading);
+        }
+    }
+
+    /// Whether a power from nought up comes next: `²`, `^2`, `^0.5`, `^(…)`.
+    /// A power below nought does not count. `100 s^-1` is a hundred a
+    /// second, and nobody means one over a hundred seconds by it.
+    fn power_follows(&self) -> bool {
+        match self.peek() {
+            Some(Token::Super(n)) => *n > 0,
+            Some(Token::Caret) => self.tokens.get(self.pos + 1) != Some(&Token::Minus),
+            _ => false,
         }
     }
 
@@ -1257,6 +1315,9 @@ impl<'a> Parser<'a> {
         // Something was expected here and the input has run out.
         let Some(token) = self.peek().cloned() else { return self.refuse(Why::Unfinished) };
         self.pos += 1;
+        // Whether `power` asked for this operand, and so will see what
+        // comes after it.
+        let from_power = std::mem::take(&mut self.from_power);
         match token {
             Token::Number(value) => {
                 self.has_value = true;
@@ -1275,6 +1336,25 @@ impl<'a> Parser<'a> {
                     self.interesting = true;
                     if dim == NO_DIM && self.bare_text.is_none() {
                         self.bare_text = Some(format!("{value}{word}"));
+                    }
+                    // A power straight after a value with its unit is a
+                    // power of the value: `12V^2` is twelve volts squared,
+                    // as it is said, and not twelve square volts. Decided
+                    // by the user on 2026-11-24; the answer says beneath
+                    // how it was read. A length keeps the power on its
+                    // unit, since `25mm^2` is an area. So does a program:
+                    // the language Claude writes in is as it was.
+                    if from_power
+                        && self.typed_input()
+                        && dim != NO_DIM
+                        && dim != LENGTH
+                        && self.power_follows()
+                        && let Some(Suffix::Unit { scale: prefix, index: at }) = lookup(&word)
+                    {
+                        self.typed.push((at, 1));
+                        let unit = format!("{}{}", prefix_symbol(prefix), UNITS[at].names[0]);
+                        self.left_power = Some(format!("{} {unit}", plain_copy(value)));
+                        return Some(Quantity::of(value * scale, dim));
                     }
                     let (scale, dim) = self.finish_unit(scale, dim, index);
                     return Some(Quantity::of(value * scale, dim));
@@ -2272,7 +2352,13 @@ fn in_base(number: u64, base: Option<Base>) -> Answer {
 fn with_bases(answer: Answer, quantity: Quantity) -> Answer {
     match whole_number(quantity) {
         Some(number) if answer.parts.is_none() && answer.angle.is_none() => {
-            Answer { given: answer.given, uses: answer.uses, steps: answer.steps, ..in_base(number, None) }
+            Answer {
+                given: answer.given,
+                uses: answer.uses,
+                steps: answer.steps,
+                read: answer.read,
+                ..in_base(number, None)
+            }
         }
         _ => answer,
     }
@@ -2322,6 +2408,11 @@ struct Hints {
     celsius: bool,
     fahrenheit: bool,
     typed: Vec<(usize, i32)>,
+    /// Each value whose power was put on all of it: `(12 V)²`. Carried
+    /// with the rest, so that the answer to a formula says how a power in
+    /// one of its values was read. Not kept with a kept value: what it
+    /// says is about the input it was typed in.
+    read_as: Vec<String>,
 }
 
 impl Hints {
@@ -2334,6 +2425,7 @@ impl Hints {
             celsius: parser.celsius,
             fahrenheit: parser.fahrenheit,
             typed: parser.typed.clone(),
+            read_as: parser.read_as.clone(),
         }
     }
 
@@ -2345,6 +2437,7 @@ impl Hints {
         self.celsius |= other.celsius;
         self.fahrenheit |= other.fahrenheit;
         self.typed.extend(&other.typed);
+        self.read_as.extend(other.read_as.iter().cloned());
     }
 }
 
@@ -3668,6 +3761,7 @@ fn attempt_noting(
     parser.celsius = part.hints.celsius;
     parser.fahrenheit = part.hints.fahrenheit;
     parser.typed = part.hints.typed.clone();
+    parser.read_as = part.hints.read_as.clone();
     let Some(result) = parser.sum() else {
         *why = parser.why.take();
         return None;
@@ -3779,6 +3873,16 @@ fn attempt_noting(
             _ => None,
         }
     };
+    // A result that is a whole power of a unit the user typed has no name
+    // of its own. It is shown in that unit to that power: `(0.9656 V)^2`
+    // is 0.9324 V². With no prefix, since µV² could be read two ways, and
+    // for typed input only.
+    let powered: Option<(f64, String)> = parser.typed.iter().filter(|_| !in_program).find_map(|&(index, _)| {
+        let unit = &UNITS[index];
+        (2..=4)
+            .find(|&n| unit.dim != NO_DIM && unit.dim.map(|d| d * n as i8) == result.dim)
+            .map(|n| (unit.factor.powi(n), format!("{}{}", unit.names[0], superscript(n))))
+    });
     let joules = parser.joules;
     let in_hertz = typed_in_hertz(&parser, result.dim);
     // A real value of the result's kind as it is shown: in the unit asked
@@ -3803,6 +3907,7 @@ fn attempt_noting(
             // name (mA/V² for a MOSFET's k). It is shown in SI base units
             // and labelled as such, so the steps after it can still run.
             None => shown_by_default(value, result.dim, joules)
+                .or_else(|| powered.as_ref().map(|(size, label)| shown_as_is(value / size, label)))
                 .or_else(|| in_program.then(|| shown_as_is(value, "(SI)"))),
         }
     };
@@ -3899,6 +4004,8 @@ fn attempt_noting(
         Some(beneath) => Answer { parts: Some(beneath), ..answer },
         None => answer,
     };
+    // How a power after a value was read, where that had two meanings.
+    let answer = Answer { read: read_line(&parser.read_as), ..answer };
     let ranged = tolerance.is_some();
     let result = Quantity { value: stands_for, ..result };
 
@@ -4338,6 +4445,9 @@ pub fn keep(input: &str, kept: &[Kept]) -> Result<Kept, Option<String>> {
         return Err(Some(Why::CannotKeep.say()));
     }
     keepable_name(name).map_err(|why| Some(why.say()))?;
+    // How a power was read is said beneath the answer it was typed for,
+    // not beneath every later answer that uses the value.
+    let hints = Hints { read_as: Vec::new(), ..hints };
     Ok(Kept {
         name: name.to_string(),
         value: quantity.value,
@@ -6027,9 +6137,99 @@ mod tests {
         );
         // Of two values that differ only in sign, the one shown is put back.
         assert_eq!(
-            steps_of("y^2 = 144 V^2"),
-            ["y | found by trial | 12.00 V", "(12.00 V)^2 = 144 V^2 | put back | 144.0 (SI) = 144.0 (SI)"]
+            steps_of("y^2 = (12 V)^2"),
+            ["y | found by trial | 12.00 V", "(12.00 V)^2 = (12 V)^2 | put back | 144.0 V² = 144.0 V²"]
         );
+    }
+
+    /// The answer, and the line beneath it that says how a power was read.
+    #[track_caller]
+    fn check_read(input: &str, expected: &str, read: Option<&str>) {
+        let answer = evaluate(input).unwrap_or_else(|| panic!("no answer for {input:?}"));
+        let shown = format!("{} {}", answer.number, answer.unit);
+        assert_eq!(shown.trim_end(), expected, "for {input:?}");
+        assert_eq!(answer.read.as_deref(), read, "for {input:?}");
+    }
+
+    #[test]
+    fn a_power_after_a_value_is_a_power_of_the_value() {
+        // `12V^2` is twelve volts squared, as it is said, and the answer
+        // says beneath that it was read so. It used to be twelve square
+        // volts, and `12V^2 / 8ohm` answered 1.500 W with no warning.
+        check_read("12V^2 / 8ohm", "18.00 W", Some("read as (12 V)²"));
+        check_read("12 V^2 / 8 ohm", "18.00 W", Some("read as (12 V)²"));
+        check_read("12V² / 8ohm", "18.00 W", Some("read as (12 V)²"));
+        check_read("2A^2 * 8ohm", "32.00 W", Some("read as (2 A)²"));
+        check_read("2mA^2 * 1kohm", "4.000 mW", Some("read as (2 mA)²"));
+        check_read("0.5 * 100uF * 12V^2", "7.200 mJ", Some("read as (12 V)²"));
+        check_read("3.3V^2 / 1kohm to mW", "10.89 mW", Some("read as (3.3 V)²"));
+        check_read(".9656V^2", "0.9324 V²", Some("read as (0.9656 V)²"));
+        check_read("4V^3", "64.00 V³", Some("read as (4 V)³"));
+        check_read("3 s^2", "9.000 s²", Some("read as (3 s)²"));
+        // Each one is said, once.
+        check_read("12V^2 / 8ohm + 2A^2 * 8ohm", "50.00 W", Some("read as (12 V)², (2 A)²"));
+        check_read("12V^2 / 8ohm + 12V^2 / 4ohm", "54.00 W", Some("read as (12 V)²"));
+        // It is the same as writing the brackets, which says nothing.
+        check_read("(12V)^2 / 8ohm", "18.00 W", None);
+        check_read("12V * 12V / 8ohm", "18.00 W", None);
+        // In a value given after a formula, and in an equation.
+        check_read("P = Vsq / R, Vsq = 12V^2, R = 8ohm", "18.00 W", Some("read as (12 V)²"));
+        check_read("I^2 * 8ohm = 2A^2 * 8ohm", "2.000 A", Some("read as (2 A)²"));
+        check_read("y^2 = 144 V^2", "144.0 V", Some("read as (144 V)²"));
+        // With a helper on the end.
+        check_read("12V^2 / 8ohm +/- 5%", "18.00 W", Some("read as (12 V)²"));
+        check_read("12V^2 / 8ohm to E12", "18 W", Some("read as (12 V)²"));
+    }
+
+    #[test]
+    fn where_a_power_stays_on_the_unit() {
+        // A length: `25mm^2` is an area, not 25 mm squared.
+        check_read("25mm^2", "25.00 mm²", None);
+        check_read("6 bar * pi * 25mm^2", "47.12 N", None);
+        check_read("2 in² to cm²", "12.90 cm²", None);
+        check_read("(25mm)^2", "6.250 cm²", None);
+        // A unit that does not come straight after the number.
+        check_read("9.81 m/s^2", "9.810 m/s²", None);
+        check_read("5 kg * 9.81 m/s^2", "49.05 N", None);
+        check_read("2 mA/V^2 * 3 V * 3 V", "18.00 mA", None);
+        // A power below nought: a hundred a second, not one over a
+        // hundred seconds.
+        check_read("100 s^-1", "100.0 Hz", None);
+        check_read("100 Hz^-1", "100.0 s", None);
+        // A name, which was always the whole value.
+        check_read("P = V^2 / R, V = 12V, R = 8ohm", "18.00 W", None);
+        // A prefix with no unit, which never had two readings.
+        check_read("4.7k^2", "22.09 M", None);
+        // Under a root sign the power is on the unit, as before.
+        check_read("√12V^2", "3.464 V", None);
+        // A program is as it was: Claude is told to write `(25mm)^2`.
+        assert_eq!(run(&[expression("P", "12V^2 / 8ohm")]).unwrap()[0], "1.500 W");
+        // A kept value does not go on saying how it was typed.
+        let kept = session(&["P1 = 12V^2 / 8ohm"]);
+        assert_eq!(evaluate_in("P1 * 2", &kept).unwrap().read, None);
+        check_in(&kept, "P1 * 2", "36.00 W", Some("P1 = 18.00 W"));
+    }
+
+    #[test]
+    fn a_whole_power_of_a_unit_typed_is_shown() {
+        // It has no name of its own, so it is shown in the unit typed, to
+        // that power, with no prefix: µV² could be read two ways.
+        check("5V * 5V", "25.00 V²");
+        check("(5 mV)^2", "2.500e-5 V²");
+        check("(2 A)^2", "4.000 A²");
+        check("(10 psi)^2", "100.0 psi²");
+        check("1Mohm^2", "1.000e12 Ω²");
+        check("sqrt(5V * 5V)", "5.000 V");
+        // A length squared has a name, and keeps it.
+        check("(25mm)^2", "6.250 cm²");
+        // It can be kept, and shown again.
+        let kept = session(&["Vsq = 12V^2"]);
+        check_in(&kept, "Vsq / 8ohm", "18.00 W", Some("Vsq = 144.0 V²"));
+        // Only a unit that was typed: this is in square amps, and no amp
+        // was typed.
+        refuse("2 W / 8 ohm");
+        // And only a whole power.
+        refuse("12V^0.5");
     }
 
     #[test]
@@ -6492,7 +6692,6 @@ mod tests {
             "10 dB",
             "3 apples",
             "1,000 * 2",
-            "5V * 5V",
             "sin(2V)",
             "2^(1V)",
             "s",

@@ -41,6 +41,9 @@ and has not been tried yet.
 0.19.0 (2026-11-24, not released): a Clear memory button on the bar
 forgets the values kept for the session without quitting. The user asked
 for it; see "Clear memory" under "Named values that last the session".
+0.20.0 (2026-11-24, not released): `12V^2` is twelve volts squared, and
+the answer says beneath that it was read so. It changes answers that
+were given before. See "A power after a value".
 
 ## Purpose
 
@@ -751,7 +754,9 @@ Rules:
   a complex answer, the magnitude, by the same rule.
 - A bare number on its own gives no answer.
 - Standard operator precedence applies. `1/2*pi` is (1/2)×π. A power on a
-  unit belongs to the unit: `5 m^2` is five square metres.
+  length belongs to the unit: `5 m^2` is five square metres. On any other
+  unit straight after a number it is a power of the whole value, since
+  0.20.0: `12V^2` is twelve volts squared (see "A power after a value").
 - While the input is being edited and is not valid, the previous answer
   stays in place but dimmed, and cannot be copied. A dimmed answer is never
   current.
@@ -771,6 +776,90 @@ Rules:
 Not in the instant path: the decimal comma, and a plain ratio in
 decibels. Those go to Claude. Values that last from one input to the next
 were on this list until 0.15.0.
+
+### A power after a value (0.20.0)
+
+Raised by the user on 2026-11-24: "I find I try to square volts like
+this: .9656V^2 and it doesnt work unless I remove the V."
+
+**What was found.** A power typed after a unit was put on the unit alone,
+so `.9656V^2` was 0.9656 square volts. That has no unit with a name, so
+nothing was shown. Worse, `12V^2 / 8ohm` answered 1.500 W with no
+warning, where twelve volts squared over eight ohms is 18.00 W. The same
+went for `2A^2 * 8ohm` (16.00 W, for 32.00 W) and
+`0.5 * 100uF * 12V^2` (600.0 µJ, for 7.200 mJ). It is the reading other
+unit calculators have, and for volts and amps it is almost never the one
+meant.
+
+**Decided with the user that day,** from three choices: square the whole
+value; refuse the form and say why, as a lone `m` is refused; or leave
+the reading and only show square volts. They chose the first, and that
+the answer says beneath how it was read.
+
+| Input | Answer | Beneath |
+|---|---|---|
+| `.9656V^2` | 0.9324 V² | read as (0.9656 V)² |
+| `12V^2 / 8ohm` | 18.00 W | read as (12 V)² |
+| `2A^2 * 8ohm` | 32.00 W | read as (2 A)² |
+| `0.5 * 100uF * 12V^2` | 7.200 mJ | read as (12 V)² |
+| `12V^2 / 8ohm + 2A^2 * 8ohm` | 50.00 W | read as (12 V)², (2 A)² |
+| `(12V)^2 / 8ohm` | 18.00 W | |
+| `25mm^2` | 25.00 mm² | |
+| `9.81 m/s^2` | 9.810 m/s² | |
+
+The rule (`operand` and `power` in `calc.rs`):
+
+- **A power straight after a number and its unit is a power of the whole
+  value.** `^2`, `²`, `^3`, and any other power from nought up.
+- **A length keeps the power on its unit:** `25mm^2` is an area and
+  `2 in² to cm²` a conversion of one. So does a unit that does not come
+  straight after the number (`9.81 m/s^2`, `2 mA/V^2`), and a power below
+  nought (`100 s^-1` is a hundred a second).
+- **This is an exception to "when it is unsure, it returns nothing",**
+  made knowingly. The input has two readings and the engine takes one.
+  What makes that acceptable is the line beneath: the reading is never
+  unseen. The reading it took before was also one of two, and was not
+  said.
+- **The line beneath** (`read` on `Answer`) names each value read this
+  way, once: "read as (12 V)²". It is not there when brackets were typed,
+  when a name was squared, or for a length. It comes after a helper's
+  line and before the line of kept values.
+- **It is carried from a value given after a formula** to the formula's
+  answer, with what the units said (`Hints`), and so through an equation.
+  A kept value does not go on saying it: the line is about the input it
+  was typed in.
+- **Answers that change** are all of this form, and all gain the line. An
+  example of one that changes the other way: `y^2 = 144 V^2` was solved
+  as 12 V and is now 144 V, with "read as (144 V)²" beneath. Whoever
+  means 144 square volts there writes `y^2 = (12 V)^2`, or
+  `144 V * 1 V`.
+- **Typed input only.** A program is read as it was, and Claude's
+  instructions, which tell it to write `(25mm)^2`, are unchanged.
+
+**A whole power of a unit typed is now shown.** `(0.9656 V)^2` has no
+unit with a name, and was refused. A result that is the second, third or
+fourth power of a unit the user typed is shown in that unit to that
+power: `5V * 5V` is 25.00 V², `(10 psi)^2` is 100.0 psi². It has no
+prefix, since µV² could be read two ways: `(5 mV)^2` is 2.500e-5 V². Only
+a unit that was typed: `2 W / 8 ohm` is in square amps and is still
+refused. This is a small part of "a unit with no name", which is
+otherwise still not done.
+
+Not done: asking the user which reading they mean; the same choice for a
+length (`pi * 25mm^2` for the area of a circle is still 25 square
+millimetres times π); and a fractional power of a unit (`12V^0.5` has no
+answer).
+
+Checked for 0.20.0 (2026-11-24): 109 unit tests, of which three groups
+are new (a power after a value, where a power stays on the unit, and a
+whole power of a unit shown). Two old tests were changed because what
+they asserted changed: `5V * 5V` is no longer refused, and the equation
+whose steps were tested is now written with brackets. Every reference
+problem through the instant path alone, which answers the same six; and
+the window in the built-in browser, where the line is beneath the
+answers above, is absent with brackets and for a length, and sits under
+a tolerance's line. Not checked: the real app. The instructions to
+Claude are unchanged, so the reference set was not run through a model.
 
 ### Steps for instant answers (0.18.0)
 

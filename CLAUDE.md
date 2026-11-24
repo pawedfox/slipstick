@@ -17,9 +17,11 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.19.0, not yet released; 0.18.0 is the current release
+Version 0.20.0, not yet released; 0.18.0 is the current release
 (2026-11-24). The one before it was 0.11.0; 0.12.0 to 0.17.0 were never
-tagged. 0.19.0 adds the Clear memory button (see "Layout"). Work follows
+tagged. 0.19.0 adds the Clear memory button (see "Layout"), and 0.20.0
+reads `12V^2` as twelve volts squared and says so beneath the answer
+("A power after a value" in `SPEC.md`). Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
 when the mission was re-framed (see "Purpose" in `SPEC.md`):
 
@@ -202,6 +204,14 @@ Run from the repo root unless noted.
   are a number only at the start of one, with a digit after
   (`based_number`); `2x3` must stay a multiplication. A tolerance comes
   last and is never read on a value inside a sum.
+  A power straight after a number and its unit (`12V^2`) is a power of
+  the whole value, and the answer carries `read` ("read as (12 V)²") so
+  that the reading is never unseen. The user chose this knowing it is
+  one of two readings; it is the one exception to "when unsure, return
+  nothing", and it rests on that line being shown. Do not widen it
+  without asking, and never drop the line. A length keeps the power on
+  its unit (`25mm^2`), as does a unit not straight after the number
+  (`m/s^2`), a power below nought (`s^-1`) and anything in a program.
   The steps of an instant answer (`Worked`) are made after the answer,
   from what working it out found (`Trace`, `Form::account`). Keep it
   that way: nothing that makes steps may change a number, and where
