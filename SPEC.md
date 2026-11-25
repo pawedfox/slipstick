@@ -5,7 +5,7 @@ Called Clawculator until version 0.9.0 (2026-11-20). See "Name" under
 were under the old name (its installers, its install folder, the name
 check), the old name is left in place.
 
-Status (2026-11-24, version 0.18.0, the current release): everything on
+Status (2026-11-24, version 0.20.0, the current release): everything on
 the first roadmap is built, for the Claude Code route. 0.9.2 was the first
 public release, 0.10.1 followed on 2026-11-22, and 0.11.0 the same
 day (see "Release"). 0.10.0 and 0.10.1 added decibels, temperature sums and
@@ -38,12 +38,14 @@ That is the last slice listed under "Hardening the engine". Next on the
 roadmap is item 2, macOS, which starts with a short trial on a real Mac.
 A trial build for it was made on 2026-11-24, on the `macos-trial` branch,
 and has not been tried yet.
-0.19.0 (2026-11-24, not released): a Clear memory button on the bar
+0.19.0 (2026-11-24, never tagged): a Clear memory button on the bar
 forgets the values kept for the session without quitting. The user asked
 for it; see "Clear memory" under "Named values that last the session".
-0.20.0 (2026-11-24, not released): `12V^2` is twelve volts squared, and
-the answer says beneath that it was read so. It changes answers that
-were given before. See "A power after a value".
+0.20.0 (released 2026-11-24, with 0.19.0 in it; see "Release"): `12V^2`
+is twelve volts squared, and the answer says beneath that it was read
+so. It changes answers that were given before, one of which (`12V^2 /
+8ohm`) was a wrong number shown with no warning in 0.18.0. See "A power
+after a value".
 
 ## Purpose
 
@@ -373,6 +375,25 @@ public.
   - The README in the tagged source says "not yet released", as the tag
     was made before the release was. The README on `main` is the one
     people read, and was put right the same day.
+- **0.20.0**, tagged 2026-11-24 on the user's word, a few hours after
+  0.18.0 was published. It carries the Clear memory button (0.19.0, never
+  tagged) and the reading of a power after a value (0.20.0). The reason
+  to release so soon was put to the user: 0.18.0 answers `12V^2 / 8ohm`
+  as 1.500 W with no warning.
+  - GitHub built it in under ten minutes, every step passing, and the
+    checksum in `SHA256SUMS.txt` is the installer's
+    (`Slipstick_0.20.0_x64-setup.exe`, 1.58 MB).
+  - The user was asked to try, from the draft, a power after a value and
+    its line beneath, a length with a power, and the Clear memory button,
+    none of which had been seen outside the built-in browser. They did
+    not say whether they had, and were not asked again.
+  - **Published 2026-11-24** on the user's word, with release notes that
+    open with the corrected answer and were on the draft for them to
+    read. Every answer quoted in the notes was run through the engine
+    that day. Checked without signing in: it is the latest release, and
+    the downloaded installer's SHA-256 is the one in `SHA256SUMS.txt`.
+  - As with 0.18.0, the README in the tagged source says "not yet
+    released", and the one on `main` was put right the same day.
 - **Published 2026-11-21**, on the user's word, after the user installed
   the 0.9.2 installer from the draft and found it working. Checked
   without signing in: the repository page, the README's pictures and the

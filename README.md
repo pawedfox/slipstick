@@ -14,9 +14,10 @@ Windows will say when you run it.
 
 Unofficial project. Not affiliated with or endorsed by Anthropic.
 
-Status: version 0.20.0, not yet released. The latest release is 0.18.0,
-which has no Clear memory button and reads `12V^2` as twelve square
-volts (see "A power after a value" below). It is one person's tool, in
+Status: version 0.20.0, released 2026-11-24. If you have 0.18.0, update:
+it reads `12V^2` as twelve square volts, so `12V^2 / 8ohm` gives 1.500 W
+where it should give 18.00 W (see "A power after a value" below). It is
+one person's tool, in
 daily use by its author; expect rough edges. See
 [What is not done](#what-is-not-done).
 

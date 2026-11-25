@@ -17,9 +17,9 @@ do not quietly change the spec or work around it.
 
 ## Current state
 
-Version 0.20.0, not yet released; 0.18.0 is the current release
-(2026-11-24). The one before it was 0.11.0; 0.12.0 to 0.17.0 were never
-tagged. 0.19.0 adds the Clear memory button (see "Layout"), and 0.20.0
+Version 0.20.0, the current release (2026-11-24). The ones before it
+were 0.18.0, the same day, and 0.11.0; 0.12.0 to 0.17.0 and 0.19.0 were
+never tagged. 0.19.0 adds the Clear memory button (see "Layout"), and 0.20.0
 reads `12V^2` as twelve volts squared and says so beneath the answer
 ("A power after a value" in `SPEC.md`). Work follows
 the "Roadmap" section of `SPEC.md`, in order. It was revised on 2026-11-23,
